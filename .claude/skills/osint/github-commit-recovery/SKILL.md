@@ -1,16 +1,16 @@
 ---
-name: Github API Analysis
-description: Access GitHub data directly via REST API and web interface for forensic analysis. Use when you have commit SHAs and need to retrieve actual commit content, diffs, or patches. Includes techniques for accessing "deleted" commits that remain on GitHub servers.
+name: github-commit-recovery
+description: Recover deleted commits from GitHub using REST API, web interface, and git fetch. Use when you have commit SHAs and need to retrieve actual commit content, diffs, or patches. Includes techniques for accessing "deleted" commits that remain on GitHub servers.
 version: 1.0
 author: mbrg
 tags:
   - github
   - git
   - forensics
-  - api
+  - recovery
 ---
 
-# GitHub API Forensics
+# GitHub Commit Recovery
 
 **Purpose**: Access commit content, diffs, and metadata directly from GitHub when you have commit SHAs. Includes methods for retrieving "deleted" commits that remain accessible on GitHub servers.
 
