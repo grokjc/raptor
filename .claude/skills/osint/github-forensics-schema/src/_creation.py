@@ -944,7 +944,7 @@ def create_issue_observation_from_gharchive(
         if issue.get("number") == issue_number and timestamp in row_ts:
             state = issue.get("state", "open")
             return IssueObservation(
-                evidence_id=_generate_evidence_id("issue-gharchive", repo, str(issue_number), timestamp),
+                        evidence_id=_generate_evidence_id("issue-gharchive", repo, str(issue_number), timestamp),
                 original_when=_parse_datetime(issue.get("created_at")),
                 original_who=_make_github_actor(issue.get("user", {}).get("login", row["actor_login"])),
                 original_what=f"Issue #{issue_number} created",
@@ -1003,7 +1003,7 @@ def create_pr_observation_from_gharchive(
             if pr.get("merged"):
                 state = "merged"
             return IssueObservation(
-                evidence_id=_generate_evidence_id("pr-gharchive", repo, str(pr_number), timestamp),
+                        evidence_id=_generate_evidence_id("pr-gharchive", repo, str(pr_number), timestamp),
                 original_when=_parse_datetime(pr.get("created_at")),
                 original_who=_make_github_actor(pr.get("user", {}).get("login", row["actor_login"])),
                 original_what=f"PR #{pr_number} created",
@@ -1061,7 +1061,7 @@ def create_commit_observation_from_gharchive(
         for commit in payload.get("commits", []):
             if commit["sha"].startswith(sha) or sha.startswith(commit["sha"]):
                 return CommitObservation(
-                    evidence_id=_generate_evidence_id("commit-gharchive", repo, commit["sha"]),
+                                evidence_id=_generate_evidence_id("commit-gharchive", repo, commit["sha"]),
                     original_when=_parse_datetime(row["created_at"]),
                     original_who=GitHubActor(login=commit.get("author", {}).get("name", "")),
                     original_what=commit.get("message", "").split("\n")[0],
@@ -1128,7 +1128,7 @@ def create_force_push_observation_from_gharchive(
 
         if size == 0 and before_sha != "0" * 40:
             return CommitObservation(
-                evidence_id=_generate_evidence_id("forcepush-gharchive", repo, before_sha, timestamp),
+                        evidence_id=_generate_evidence_id("forcepush-gharchive", repo, before_sha, timestamp),
                 original_when=_parse_datetime(row["created_at"]),
                 original_who=_make_github_actor(row["actor_login"]),
                 original_what="Commit overwritten by force push",
@@ -1433,7 +1433,7 @@ def create_fork_observations(
     for fork in data:
         observations.append(
             ForkObservation(
-                evidence_id=_generate_evidence_id("fork", query.repo.full_name, fork["full_name"]),
+                        evidence_id=_generate_evidence_id("fork", query.repo.full_name, fork["full_name"]),
                 original_when=_parse_datetime(fork.get("created_at")),
                 original_who=_make_github_actor(fork["owner"]["login"], fork["owner"].get("id")),
                 original_what=f"Forked {query.repo.full_name}",

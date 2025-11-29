@@ -10,44 +10,32 @@ Two evidence types:
    Original: when, who, what (if known)
    Observer: when observed, who observed, what they found
 
-IMPORTANT: Evidence classes cannot be instantiated directly.
-Use EvidenceFactory from src/__init__.py.
+VERIFICATION:
+Every evidence object has a verify() method that:
+- Fetches the real data from the source specified in verification
+- Compares all fields to the actual values
+- Returns (is_valid: bool, errors: list[str])
+
+Usage:
+    # Create evidence however you want
+    commit = CommitObservation(...)
+
+    # Verify it matches the real source
+    is_valid, errors = commit.verify()
+    if not is_valid:
+        print("Verification failed:", errors)
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TYPE_CHECKING
 
-from pydantic import BaseModel, Field, HttpUrl, model_validator
+from pydantic import BaseModel, Field, HttpUrl
 
-
-# =============================================================================
-# INTERNAL CREATION CHECK
-#
-# Evidence classes check the call stack during instantiation.
-# Only code in _creation.py can instantiate them.
-# =============================================================================
-
-import inspect
-
-
-def _is_creation_authorized() -> bool:
-    """Check if the caller is from an authorized module."""
-    # Walk up the call stack looking for who's instantiating
-    for frame_info in inspect.stack():
-        module = frame_info.frame.f_globals.get("__name__", "")
-        # Allow if called from src._creation module specifically
-        if module == "src._creation":
-            return True
-        # Allow deserialization via load_evidence_from_json in src
-        if module == "src" and frame_info.function == "load_evidence_from_json":
-            return True
-        # Also check src.__init__ for explicit import
-        if module == "src.__init__" and frame_info.function == "load_evidence_from_json":
-            return True
-    return False
+if TYPE_CHECKING:
+    from typing import Any
 
 
 # =============================================================================
@@ -165,6 +153,10 @@ class VerificationInfo(BaseModel):
 # =============================================================================
 
 
+VerificationResult = tuple[bool, list[str]]
+"""Result of verification: (is_valid, list_of_errors)"""
+
+
 class Event(BaseModel):
     """Something that happened."""
 
@@ -175,16 +167,16 @@ class Event(BaseModel):
     repository: GitHubRepository
     verification: VerificationInfo
 
-    @model_validator(mode="before")
-    @classmethod
-    def _check_creation_authorized(cls, data):
-        """Block direct instantiation - must use EvidenceFactory."""
-        if not _is_creation_authorized():
-            raise ValueError(
-                f"Cannot instantiate {cls.__name__} directly. "
-                "Use EvidenceFactory to create evidence objects."
-            )
-        return data
+    def verify(self) -> VerificationResult:
+        """
+        Verify this event against the original source.
+
+        Returns:
+            Tuple of (is_valid, errors) where errors is empty if valid.
+        """
+        # Import here to avoid circular imports
+        from ._verification import verify_event
+        return verify_event(self)
 
 
 class CommitInPush(BaseModel):
@@ -352,16 +344,16 @@ class Observation(BaseModel):
     # State
     is_deleted: bool = False  # No longer exists at source
 
-    @model_validator(mode="before")
-    @classmethod
-    def _check_creation_authorized(cls, data):
-        """Block direct instantiation - must use EvidenceFactory."""
-        if not _is_creation_authorized():
-            raise ValueError(
-                f"Cannot instantiate {cls.__name__} directly. "
-                "Use EvidenceFactory to create evidence objects."
-            )
-        return data
+    def verify(self) -> VerificationResult:
+        """
+        Verify this observation against the original source.
+
+        Returns:
+            Tuple of (is_valid, errors) where errors is empty if valid.
+        """
+        # Import here to avoid circular imports
+        from ._verification import verify_observation
+        return verify_observation(self)
 
 
 # -----------------------------------------------------------------------------

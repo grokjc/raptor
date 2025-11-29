@@ -45,6 +45,9 @@ from ._creation import (
     GHArchiveQuery,
 )
 
+from ._store import EvidenceStore
+from ._verification import verify_all
+
 # Enums - Safe to expose, these are just constants
 from ._schema import (
     EvidenceSource,
@@ -60,10 +63,6 @@ from ._schema import (
 def load_evidence_from_json(data: dict) -> "AnyEvidence":
     """
     Load a previously serialized evidence object from JSON.
-
-    This is the ONLY supported way to instantiate evidence classes
-    outside of the EvidenceFactory. Use this to load evidence that
-    was previously created via the factory and serialized to JSON.
 
     Args:
         data: Dictionary from JSON deserialization (e.g., json.load())
@@ -149,8 +148,12 @@ def load_evidence_from_json(data: dict) -> "AnyEvidence":
 from ._schema import AnyEvidence, AnyEvent, AnyObservation
 
 __all__ = [
-    # Factory - THE ONLY entry point for creating evidence
+    # Factory - Create evidence from sources
     "EvidenceFactory",
+    # Store - Persist and query evidence collections
+    "EvidenceStore",
+    # Verification - Validate evidence against sources
+    "verify_all",
     # Query Models (for type hints)
     "RepositoryQuery",
     "CommitQuery",
@@ -171,7 +174,7 @@ __all__ = [
     "IssueAction",
     "WorkflowConclusion",
     "IOCType",
-    # Deserialization (for loading previously verified evidence)
+    # Loading from JSON
     "load_evidence_from_json",
     # Type aliases
     "AnyEvidence",
