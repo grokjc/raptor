@@ -1,0 +1,133 @@
+# Skill Access Control for OSS Forensics Agents
+#
+# This file enforces separation of concerns by restricting which skills
+# each agent can access. Orchestrator agents coordinate via Task tool,
+# specialist agents execute using their assigned skills.
+#
+# Format:
+#   agent-name:
+#     allowed_skills:
+#       - skill-name-1
+#       - skill-name-2
+
+# =============================================================================
+# ORCHESTRATOR AGENT
+# =============================================================================
+
+oss-forensics-agent:
+  allowed_skills:
+    - github-evidence-kit  # Read/write evidence store, coordinate investigation
+  prohibited_skills:
+    - github-archive       # NEVER query BigQuery directly - delegate to gh-archive-agent
+    - github-commit-recovery   # NEVER recover commits - delegate to gh-recovery-agent
+    - github-wayback-recovery  # NEVER query Wayback - delegate to gh-recovery-agent
+  enforcement: STRICT
+  rationale: "Orchestrator coordinates via Task tool, does not execute collection"
+
+# =============================================================================
+# EVIDENCE COLLECTION AGENTS (Investigators)
+# =============================================================================
+
+oss-investigator-gh-archive-agent:
+  allowed_skills:
+    - github-archive       # BigQuery queries for GH Archive
+    - github-evidence-kit  # Store collected evidence
+  prohibited_skills:
+    - github-commit-recovery   # Not responsible for recovery
+    - github-wayback-recovery  # Not responsible for Wayback queries
+  enforcement: STRICT
+  rationale: "Specialist for GH Archive BigQuery collection only"
+
+oss-investigator-gh-api-agent:
+  allowed_skills:
+    - github-evidence-kit  # Store collected evidence
+  prohibited_skills:
+    - github-archive       # Not responsible for archive queries
+    - github-commit-recovery   # Not responsible for recovery
+    - github-wayback-recovery  # Not responsible for Wayback queries
+  enforcement: STRICT
+  rationale: "Specialist for live GitHub API queries only"
+
+oss-investigator-gh-recovery-agent:
+  allowed_skills:
+    - github-commit-recovery   # Recover deleted commits
+    - github-wayback-recovery  # Query Wayback Machine
+    - github-evidence-kit      # Store recovered content
+  prohibited_skills:
+    - github-archive       # Not responsible for archive queries
+  enforcement: STRICT
+  rationale: "Specialist for content recovery via Wayback and commit fetching"
+
+oss-investigator-ioc-extractor-agent:
+  allowed_skills:
+    - github-evidence-kit  # Store extracted IOCs
+  prohibited_skills:
+    - github-archive       # Not responsible for archive queries
+    - github-commit-recovery   # Not responsible for recovery
+    - github-wayback-recovery  # Not responsible for Wayback queries
+  enforcement: STRICT
+  rationale: "Specialist for extracting IOCs from vendor reports only"
+
+oss-investigator-local-git-agent:
+  allowed_skills:
+    - github-evidence-kit  # Store git forensics findings
+  prohibited_skills:
+    - github-archive       # Not responsible for archive queries
+    - github-commit-recovery   # Uses git directly, not recovery skill
+    - github-wayback-recovery  # Not responsible for Wayback queries
+  enforcement: STRICT
+  rationale: "Specialist for local git repository forensic analysis"
+
+# =============================================================================
+# ANALYSIS AGENTS
+# =============================================================================
+
+oss-hypothesis-former-agent:
+  allowed_skills:
+    - github-evidence-kit  # Read evidence, write hypotheses
+  prohibited_skills:
+    - github-archive       # NEVER collect evidence - request via Task tool
+    - github-commit-recovery   # NEVER recover content - request via Task tool
+    - github-wayback-recovery  # NEVER query Wayback - request via Task tool
+  enforcement: STRICT
+  rationale: "Analyst reads evidence and forms hypotheses, requests collection via Task"
+
+oss-evidence-verifier-agent:
+  allowed_skills:
+    - github-evidence-kit  # Verify evidence against sources (uses built-in verifier)
+  prohibited_skills:
+    - github-archive       # Verification uses github-evidence-kit internal methods
+    - github-commit-recovery   # Verification uses github-evidence-kit internal methods
+    - github-wayback-recovery  # Verification uses github-evidence-kit internal methods
+  enforcement: STRICT
+  rationale: "Verifier uses EvidenceStore.verify_all() which handles all source types"
+
+oss-hypothesis-checker-agent:
+  allowed_skills:
+    - github-evidence-kit  # Read evidence and hypotheses for validation
+  prohibited_skills:
+    - github-archive       # NEVER collects new evidence
+    - github-commit-recovery   # NEVER collects new evidence
+    - github-wayback-recovery  # NEVER collects new evidence
+  enforcement: STRICT
+  rationale: "Validator checks hypothesis against existing verified evidence only"
+
+oss-report-generator-agent:
+  allowed_skills:
+    - github-evidence-kit  # Read evidence and confirmed hypothesis
+  prohibited_skills:
+    - github-archive       # NEVER collects new evidence
+    - github-commit-recovery   # NEVER collects new evidence
+    - github-wayback-recovery  # NEVER collects new evidence
+  enforcement: STRICT
+  rationale: "Report generator only reads confirmed data, never collects"
+
+# =============================================================================
+# ENFORCEMENT POLICY
+# =============================================================================
+#
+# STRICT: Agent will refuse to execute if it attempts to use prohibited skill
+# WARN: Agent will log warning but proceed (for backward compatibility)
+# NONE: No enforcement (documentation only)
+#
+# All OSS forensics agents use STRICT enforcement to maintain clean architecture.
