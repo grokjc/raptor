@@ -64,13 +64,15 @@ What will make RAPTOR truly transformative is community contributions. It's open
 modular, and extensible.
 
 **Be warned**: Unless you use the devcontainer, RAPTOR will automatically install tools
-without asking, check dependencies.txt first, and install dependencies.
+without asking, check dependencies.txt first.
 
 ---
 
 ## What's unique about RAPTOR?
+
 Beyond RAPTOR's potential for autonomous security research and community collaboration, it
 demonstrates how Claude Code can be adapted for any purpose**, with RAPTOR packages.
+
 ---
 
 ## Quick Start
