@@ -9,6 +9,7 @@ This is so much of a WIP, it's not even funny. However, you can see what we are 
 import subprocess
 import os
 import hashlib
+import shutil
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -82,16 +83,20 @@ class CrashAnalyser:
                 logger.info("✓ Radare2 initialized - enhanced binary analysis enabled (decompilation, xrefs, etc.)")
             except Exception as e:
                 logger.warning(f"Failed to initialize radare2 wrapper: {e}")
-                logger.warning("⚠ Falling back to objdump for basic disassembly")
+                if self._available_tools.get("objdump", False):
+                    logger.warning("⚠ Using objdump temporarily while troubleshooting radare2")
                 self.radare2 = None
         elif use_radare2 and RaptorConfig.RADARE2_ENABLE:
-            # radare2 requested but not available
-            logger.warning("⚠ radare2 not found in PATH - using objdump for basic disassembly")
-            logger.info("To enable enhanced analysis (decompilation, xrefs, call graphs):")
-            logger.info("  • macOS:     brew install radare2")
-            logger.info("  • Ubuntu:    sudo apt install radare2")
-            logger.info("  • Fedora:    sudo dnf install radare2")
-            logger.info("  • Or visit:  https://github.com/radareorg/radare2")
+            # radare2 requested but not available - install it automatically
+            logger.warning("⚠ radare2 not found - installing automatically...")
+
+            if self._available_tools.get("objdump", False):
+                logger.info("→ Using objdump temporarily while radare2 installs in background")
+            else:
+                logger.info("→ objdump also not available - installing radare2 (enhanced features)")
+
+            # Attempt automatic installation
+            self._install_radare2_background()
 
         # Cache symbol information for better performance
         self._symbol_cache = self._load_symbol_table()
@@ -136,6 +141,100 @@ class CrashAnalyser:
             pass
             
         raise RuntimeError("No suitable debugger found (gdb or lldb)")
+
+    def _install_radare2_background(self):
+        """
+        Automatically install radare2 based on detected platform.
+
+        Runs in background if objdump is available, otherwise foreground.
+        Shows clear progress messages throughout.
+        """
+        import threading
+
+        def install():
+            try:
+                system = platform.system().lower()
+
+                if system == "darwin":
+                    # macOS - use Homebrew
+                    logger.info("📦 Installing radare2 via Homebrew...")
+                    logger.info("   Command: brew install radare2")
+                    result = subprocess.run(
+                        ["brew", "install", "radare2"],
+                        capture_output=True,
+                        text=True,
+                        timeout=300  # 5 minutes
+                    )
+                    if result.returncode == 0:
+                        logger.info("✓ radare2 installed successfully via Homebrew")
+                    else:
+                        logger.error(f"✗ Failed to install radare2: {result.stderr}")
+
+                elif system == "linux":
+                    # Linux - detect package manager
+                    if shutil.which("apt"):
+                        logger.info("📦 Installing radare2 via apt (this may require sudo)...")
+                        logger.info("   Command: sudo apt install -y radare2")
+                        result = subprocess.run(
+                            ["sudo", "apt", "install", "-y", "radare2"],
+                            capture_output=True,
+                            text=True,
+                            timeout=300
+                        )
+                        if result.returncode == 0:
+                            logger.info("✓ radare2 installed successfully via apt")
+                        else:
+                            logger.error(f"✗ Failed to install radare2: {result.stderr}")
+
+                    elif shutil.which("dnf"):
+                        logger.info("📦 Installing radare2 via dnf (this may require sudo)...")
+                        logger.info("   Command: sudo dnf install -y radare2")
+                        result = subprocess.run(
+                            ["sudo", "dnf", "install", "-y", "radare2"],
+                            capture_output=True,
+                            text=True,
+                            timeout=300
+                        )
+                        if result.returncode == 0:
+                            logger.info("✓ radare2 installed successfully via dnf")
+                        else:
+                            logger.error(f"✗ Failed to install radare2: {result.stderr}")
+
+                    elif shutil.which("pacman"):
+                        logger.info("📦 Installing radare2 via pacman (this may require sudo)...")
+                        logger.info("   Command: sudo pacman -S --noconfirm radare2")
+                        result = subprocess.run(
+                            ["sudo", "pacman", "-S", "--noconfirm", "radare2"],
+                            capture_output=True,
+                            text=True,
+                            timeout=300
+                        )
+                        if result.returncode == 0:
+                            logger.info("✓ radare2 installed successfully via pacman")
+                        else:
+                            logger.error(f"✗ Failed to install radare2: {result.stderr}")
+                    else:
+                        logger.error("✗ No supported package manager found (apt, dnf, pacman)")
+                        logger.info("   Manual installation: https://github.com/radareorg/radare2")
+                else:
+                    logger.error(f"✗ Automatic installation not supported on {system}")
+                    logger.info("   Manual installation: https://github.com/radareorg/radare2")
+
+            except subprocess.TimeoutExpired:
+                logger.error("✗ radare2 installation timed out after 5 minutes")
+            except Exception as e:
+                logger.error(f"✗ Failed to install radare2: {e}")
+
+        # Run in background if objdump available, otherwise foreground
+        if self._available_tools.get("objdump", False):
+            # Background installation - don't block crash analysis
+            thread = threading.Thread(target=install, daemon=True, name="radare2-installer")
+            thread.start()
+            logger.info("→ Installation running in background (crash analysis continues)")
+        else:
+            # Foreground installation - need radare2 to proceed
+            logger.info("→ Installing radare2 now (no fallback available)...")
+            install()
 
     def _check_tool_availability(self) -> Dict[str, bool]:
         """Check which reverse engineering tools are available on the system. There are many more but this is a start."""
