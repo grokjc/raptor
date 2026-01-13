@@ -290,7 +290,7 @@ def _get_default_primary_model() -> 'ModelConfig':
             provider="gemini",
             model_name="gemini-3-pro",  # Use LiteLLM alias (not gemini-3.0-pro-latest!)
             api_key=os.getenv("GEMINI_API_KEY"),
-            max_tokens=8192,
+            max_tokens=65536,
             temperature=0.7,
             cost_per_1k_tokens=0.0001,
         )
