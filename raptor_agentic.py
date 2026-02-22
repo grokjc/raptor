@@ -522,6 +522,8 @@ Examples:
             pass
 
     analysis = {}
+    autonomous_out = None
+    analysis_report = None
     if not llm_available:
         print("\n⚠️  Phase 2 skipped - No LLM provider available")
         print("    To enable autonomous analysis, either:")
@@ -548,15 +550,28 @@ Examples:
         autonomous_out = out_dir / "autonomous"
         autonomous_out.mkdir(exist_ok=True)
 
-        analysis_cmd = [
-            "python3",
-            str(script_root / "packages/llm_analysis/agent.py"),
-            "--repo", str(repo_path),
-            "--sarif"
-        ] + [str(f) for f in sarif_files] + [
-            "--out", str(autonomous_out),
-            "--max-findings", str(args.max_findings)
-        ]
+        # Check if validation produced enriched findings
+        validated_findings_path = out_dir / "validation" / "findings.json"
+        if validated_findings_path.exists():
+            logger.info("Using validated findings for LLM analysis (enriched with feasibility data)")
+            analysis_cmd = [
+                "python3",
+                str(script_root / "packages/llm_analysis/agent.py"),
+                "--repo", str(repo_path),
+                "--findings", str(validated_findings_path),
+                "--out", str(autonomous_out),
+                "--max-findings", str(args.max_findings)
+            ]
+        else:
+            analysis_cmd = [
+                "python3",
+                str(script_root / "packages/llm_analysis/agent.py"),
+                "--repo", str(repo_path),
+                "--sarif"
+            ] + [str(f) for f in sarif_files] + [
+                "--out", str(autonomous_out),
+                "--max-findings", str(args.max_findings)
+            ]
 
         rc, stdout, stderr = run_command_streaming(analysis_cmd, "Analysing vulnerabilities autonomously")
 
@@ -652,9 +667,9 @@ Examples:
         "outputs": {
             "sarif_files": [str(f) for f in sarif_files],
             "validation_report": str(out_dir / "validation" / "findings.json") if validation_result else None,
-            "autonomous_report": str(analysis_report) if 'analysis_report' in locals() and analysis_report.exists() else None,
-            "exploits_directory": str(autonomous_out / "exploits") if 'autonomous_out' in locals() else None,
-            "patches_directory": str(autonomous_out / "patches") if 'autonomous_out' in locals() else None,
+            "autonomous_report": str(analysis_report) if analysis_report and analysis_report.exists() else None,
+            "exploits_directory": str(autonomous_out / "exploits") if autonomous_out else None,
+            "patches_directory": str(autonomous_out / "patches") if autonomous_out else None,
             "exploit_feasibility": str(out_dir / "exploit_feasibility.txt") if mitigation_result else None,
         }
     }
@@ -687,9 +702,9 @@ Examples:
         print(f"   Exploit feasibility: {out_dir / 'exploit_feasibility.txt'}")
     if validation_result:
         print(f"   Validation: {out_dir / 'validation'}/")
-    if 'analysis_report' in locals() and analysis_report.exists():
+    if analysis_report and analysis_report.exists():
         print(f"   Analysis: {analysis_report}")
-    if 'autonomous_out' in locals():
+    if autonomous_out:
         print(f"   Exploits: {autonomous_out / 'exploits'}/")
         print(f"   Patches: {autonomous_out / 'patches'}/")
 

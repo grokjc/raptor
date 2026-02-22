@@ -64,6 +64,10 @@ class VulnerabilityContext:
         self.dataflow_steps: List[Dict[str, Any]] = []
         self.sanitizers_found: List[str] = []
 
+        # Feasibility data from validation pipeline (if available)
+        self.feasibility: Optional[Dict[str, Any]] = finding.get("feasibility")
+        self.attack_path_ref: Optional[str] = self.feasibility.get("attack_path_ref") if isinstance(self.feasibility, dict) else None
+
         # Will be populated by LLM analysis
         self.full_code: Optional[str] = None
         self.surrounding_context: Optional[str] = None
@@ -88,7 +92,7 @@ class VulnerabilityContext:
             return False
 
         try:
-            with open(file_path, "r") as f:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
 
             # Get the specific vulnerable lines
@@ -131,7 +135,7 @@ class VulnerabilityContext:
             if not file_path.exists():
                 return f"[File not found: {file_uri}]"
 
-            with open(file_path, "r") as f:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
 
             # Get context around the line
@@ -245,6 +249,10 @@ class VulnerabilityContext:
             "has_patch": self.patch_code is not None,
         }
 
+        # Add feasibility data if present
+        if self.feasibility:
+            result["feasibility"] = self.feasibility
+
         # Add dataflow information if present
         if self.has_dataflow:
             result["has_dataflow"] = True
@@ -259,6 +267,46 @@ class VulnerabilityContext:
             result["has_dataflow"] = False
 
         return result
+
+
+def convert_validated_to_agent_format(data: dict) -> List[Dict[str, Any]]:
+    """Convert validation pipeline findings.json to VulnerabilityContext format.
+
+    Skips ruled_out, confirmed_blocked, and unlikely-verdict findings.
+    Normalizes status fields in-place before filtering (idempotent).
+    """
+    try:
+        from packages.exploitability_validation import normalize_findings
+        normalize_findings(data)
+    except ImportError:
+        pass
+    converted = []
+    for finding in data.get("findings", []):
+        # Check both status and final_status for exclusion
+        if finding.get("status") in ("ruled_out", "disproven"):
+            continue
+        if finding.get("final_status") in ("ruled_out", "confirmed_blocked"):
+            continue
+        feasibility = finding.get("feasibility") or {}
+        if feasibility.get("verdict") == "unlikely":
+            continue
+
+        converted.append({
+            "finding_id": finding.get("id"),
+            "rule_id": finding.get("rule_id") or finding.get("vuln_type"),
+            "file": finding.get("file"),
+            "startLine": finding.get("line"),
+            "endLine": finding.get("line"),
+            "snippet": (finding.get("proof") or {}).get("vulnerable_code", "") if isinstance(finding.get("proof"), dict) else "",
+            "message": finding.get("candidate_reasoning", "") or f"{finding.get('vuln_type')} in {finding.get('function', 'unknown')}",
+            "level": "error" if finding.get("final_status") in ("exploitable", "likely_exploitable", "confirmed_constrained") else "warning",
+            "has_dataflow": bool((finding.get("proof") or {}).get("flow")) if isinstance(finding.get("proof"), dict) else False,
+            "feasibility": feasibility,
+            "attack_path_ref": feasibility.get("attack_path_ref"),
+            "ruling": finding.get("ruling"),
+            "final_status": finding.get("final_status") or "pending",
+        })
+    return converted
 
 
 class AutonomousSecurityAgentV2:
@@ -295,6 +343,29 @@ class AutonomousSecurityAgentV2:
             print("     export ANTHROPIC_API_KEY=your_key  (recommended)")
             print("     export OPENAI_API_KEY=your_key")
         print()
+
+    def _load_attack_path(self, ref: str) -> Optional[Dict[str, Any]]:
+        """Load attack path from a ref like 'attack-paths.json#PATH-001'."""
+        if not ref or '#' not in ref:
+            return None
+        try:
+            file_name, path_id = ref.split('#', 1)
+            # Search in validation directory — check multiple likely locations
+            candidates = [
+                self.out_dir.parent / "validation" / file_name,    # Normal pipeline layout
+                self.out_dir / file_name,                           # Same directory as findings
+                self.out_dir.parent / file_name,                    # One level up
+            ]
+            for search_path in candidates:
+                if search_path.exists():
+                    with open(search_path, 'r', encoding='utf-8', errors='replace') as f:
+                        paths = json.load(f)
+                    if isinstance(paths, list):
+                        return next((p for p in paths if p.get("id") == path_id), None)
+            return None
+        except (json.JSONDecodeError, OSError, StopIteration) as e:
+            logger.debug(f"Failed to load attack path from '{ref}': {e}")
+            return None
 
     def validate_dataflow(self, vuln: VulnerabilityContext) -> Dict[str, Any]:
         """
@@ -708,10 +779,10 @@ Provide honest, technical assessments. Don't overstate severity, but don't downp
                 logger.info(f"    Source attacker-controlled: {analysis.get('source_attacker_controlled', 'N/A')}")
                 logger.info(f"    Sanitizers effective: {analysis.get('sanitizers_effective', 'N/A')}")
                 if analysis.get('sanitizer_bypass_technique'):
-                    logger.info(f"    Bypass technique: {analysis.get('sanitizer_bypass_technique')[:100]}...")
+                    logger.info(f"    Bypass technique: {(analysis.get('sanitizer_bypass_technique') or '')[:100]}...")
                 logger.info(f"    Dataflow exploitable: {analysis.get('dataflow_exploitable', 'N/A')}")
 
-            logger.info(f"\n  Reasoning: {analysis.get('reasoning')[:150]}...")
+            logger.info(f"\n  Reasoning: {(analysis.get('reasoning') or '')[:150]}...")
             if analysis.get('attack_scenario'):
                 logger.info(f"  Attack Scenario: {analysis.get('attack_scenario')[:150]}...")
 
@@ -732,7 +803,7 @@ Provide honest, technical assessments. Don't overstate severity, but don't downp
                         vuln.exploitability_score = 0.0
                     elif not validation.get('is_exploitable'):
                         logger.info(f"⚠️  Validation determined NOT EXPLOITABLE:")
-                        logger.info(f"    Reason: {validation.get('exploitability_reasoning')[:150]}")
+                        logger.info(f"    Reason: {(validation.get('exploitability_reasoning') or '')[:150]}")
                         vuln.exploitable = False
                         vuln.exploitability_score = validation.get('exploitability_confidence', 0.0) * 0.5
                     else:
@@ -778,8 +849,8 @@ Provide honest, technical assessments. Don't overstate severity, but don't downp
         logger.info(f"Generating exploit PoC for {vuln.rule_id}")
         logger.info(f"   Target: {vuln.file_path}:{vuln.start_line}")
 
-        prompt = f"""You are an expert security researcher creating a proof-of-concept exploit for authorised security testing. 
-        This is needed for detection engineering and to validate patches. This is strictly for defensive security purposes. 
+        prompt = f"""You are an expert security researcher creating a proof-of-concept exploit for authorised security testing.
+        This is needed for detection engineering and to validate patches. This is strictly for defensive security purposes.
         You are Mark Dowd or Charlie Miller. Do not guess or assume at any time.
 
 **Vulnerability:**
@@ -789,7 +860,25 @@ Provide honest, technical assessments. Don't overstate severity, but don't downp
 
 **Analysis:**
 {json.dumps(vuln.analysis, indent=2)}
+"""
 
+        # Add exploitation constraints from feasibility analysis if available
+        if hasattr(vuln, 'feasibility') and vuln.feasibility:
+            chain_breaks = vuln.feasibility.get("chain_breaks", [])
+            what_would_help = vuln.feasibility.get("what_would_help", [])
+            if chain_breaks or what_would_help:
+                prompt += "\n**EXPLOITATION CONSTRAINTS:**\n"
+                if chain_breaks:
+                    prompt += "Techniques that WON'T work (verified blockers):\n"
+                    for cb in chain_breaks:
+                        prompt += f"  - {cb}\n"
+                if what_would_help:
+                    prompt += "Viable approaches to consider:\n"
+                    for wh in what_would_help:
+                        prompt += f"  - {wh}\n"
+                prompt += "\nDo NOT attempt blocked techniques. Focus on viable approaches.\n"
+
+        prompt += f"""
 **Vulnerable Code:**
 ```
 {vuln.full_code}
@@ -879,7 +968,25 @@ Make exploits safe for authorised testing only and not sold to russians. coz tha
 
 **Analysis:**
 {json.dumps(vuln.analysis, indent=2)}
+"""
 
+        # Add feasibility insights for patch guidance
+        if vuln.feasibility:
+            what_would_help = vuln.feasibility.get("what_would_help")
+            if what_would_help:
+                prompt += "\n**What Would Help Attacker (block these):**\n"
+                for wh in what_would_help:
+                    prompt += f"  - {wh}\n"
+
+            # Load and include attack path steps if available
+            if vuln.attack_path_ref:
+                attack_path = self._load_attack_path(vuln.attack_path_ref)
+                if attack_path and attack_path.get("path"):
+                    prompt += "\n**Attack Path (consider patching at earliest step):**\n"
+                    for step in attack_path["path"]:
+                        prompt += f"  Step {step.get('step', '?')}: {step.get('action', '')} → {step.get('result', '')}\n"
+
+        prompt += f"""
 **Vulnerable Code:**
 ```
 {vuln.full_code}
@@ -988,7 +1095,23 @@ Balance security with usability and performance."""
         # If no code block, return content as-is
         return content.strip()
 
-    def process_findings(self, sarif_paths: List[str], max_findings: int = 10) -> Dict[str, Any]:
+    def _load_validated_findings(self, findings_path: str) -> List[Dict[str, Any]]:
+        """Load pre-validated findings from the validation pipeline's findings.json.
+
+        Skips ruled_out findings and unlikely verdict findings.
+        Converts validation format to VulnerabilityContext expected format.
+        """
+        with open(findings_path, 'r') as f:
+            data = json.load(f)
+
+        converted = convert_validated_to_agent_format(data)
+
+        logger.info(f"Loaded {len(converted)} validated findings from {Path(findings_path).name} "
+                    f"(skipped {len(data.get('findings', [])) - len(converted)} ruled out/unlikely)")
+        return converted
+
+    def process_findings(self, sarif_paths: List[str] = None, findings_path: str = None,
+                         max_findings: int = 10) -> Dict[str, Any]:
         """Process findings with full LLM-powered autonomous workflow."""
         start_time = time.time()
 
@@ -997,13 +1120,17 @@ Balance security with usability and performance."""
         logger.info("PHASE II: AUTONOMOUS VULNERABILITY ANALYSIS")
         logger.info("=" * 70)
 
-        all_findings = []
-        for sarif_path in sarif_paths:
-            findings = parse_sarif_findings(Path(sarif_path))
-            logger.info(f"Loaded {len(findings)} findings from {Path(sarif_path).name}")
-            all_findings.extend(findings)
+        if findings_path:
+            # Load pre-validated findings
+            unique_findings = self._load_validated_findings(findings_path)
+        else:
+            all_findings = []
+            for sarif_path in (sarif_paths or []):
+                findings = parse_sarif_findings(Path(sarif_path))
+                logger.info(f"Loaded {len(findings)} findings from {Path(sarif_path).name}")
+                all_findings.extend(findings)
 
-        unique_findings = deduplicate_findings(all_findings)
+            unique_findings = deduplicate_findings(all_findings)
 
         # Prioritize findings with dataflow paths (for better validation coverage)
         findings_with_dataflow = [f for f in unique_findings if f.get('has_dataflow')]
@@ -1125,16 +1252,60 @@ Balance security with usability and performance."""
         return report
 
 
+def find_validation_artifacts(workdir: Path = None) -> Optional[Path]:
+    """Search for validation artifacts from recent pipeline runs.
+
+    Checks:
+    - workdir/validation/findings.json (from /agentic)
+    - .out/exploitability-validation-*/findings.json (from /validate)
+
+    Returns the most recent findings.json path, or None.
+    """
+    candidates = []
+
+    # Check workdir/validation/ (from /agentic pipeline)
+    if workdir:
+        agentic_findings = workdir / "validation" / "findings.json"
+        if agentic_findings.exists():
+            candidates.append(agentic_findings)
+
+    # Check .out/exploitability-validation-*/ (from /validate)
+    out_dir = Path(".out").resolve()  # Lock to absolute path at call time
+    if out_dir.exists():
+        for d in sorted(out_dir.glob("exploitability-validation-*"), reverse=True):
+            findings_path = d / "findings.json"
+            if findings_path.exists():
+                candidates.append(findings_path)
+                break  # Most recent only
+
+    if candidates:
+        # Return most recently modified
+        return max(candidates, key=lambda p: p.stat().st_mtime)
+    return None
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="RAPTOR Autonomous Security Agent"
     )
     ap.add_argument("--repo", required=True, help="Repository path")
-    ap.add_argument("--sarif", nargs="+", required=True, help="SARIF files")
+    ap.add_argument("--sarif", nargs="+", help="SARIF files")
+    ap.add_argument("--findings", help="Validated findings.json from exploitability validation pipeline")
     ap.add_argument("--out", help="Output directory")
     ap.add_argument("--max-findings", type=int, default=10, help="Max findings to process")
 
     args = ap.parse_args()
+
+    if not args.sarif and not args.findings:
+        ap.error("Either --sarif or --findings is required")
+
+    # Suggest --findings if validation artifacts exist nearby
+    if args.sarif and not args.findings:
+        out_path = Path(args.out).resolve() if args.out else None
+        nearby = find_validation_artifacts(out_path)
+        if nearby:
+            logger.info(f"Validation artifacts found at {nearby}")
+            logger.info("Use --findings for enriched analysis with feasibility data")
 
     repo_path = Path(args.repo).resolve()
     if args.out:
@@ -1146,8 +1317,11 @@ def main() -> None:
     # Initialize agent with LLM
     agent = AutonomousSecurityAgentV2(repo_path, out_dir)
 
-    # Process findings
-    report = agent.process_findings(args.sarif, args.max_findings)
+    # Process findings - route based on input type
+    if args.findings:
+        report = agent.process_findings(findings_path=args.findings, max_findings=args.max_findings)
+    else:
+        report = agent.process_findings(sarif_paths=args.sarif, max_findings=args.max_findings)
 
     print("\n" + "=" * 70)
     print("Autonomous Security Agent Report")

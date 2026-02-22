@@ -116,17 +116,17 @@
 2. Search: Common paths (build/, bin/, out/)
 3. Ask: User for binary path
 4. Skip: Use --skip-feasibility flag
-5. Mark: CONFIRMED_UNVERIFIED (still valid finding)
+5. Mark: confirmed_unverified (still valid finding)
 
 **exploit_feasibility package error:**
 - Check: Package installed correctly
 - Check: Binary format supported
 - Try: Manual analysis with checksec/readelf
-- Mark: CONFIRMED_UNVERIFIED with error details
+- Mark: confirmed_unverified with error details
 
 **Analysis timeout:**
 - Retry: With simpler analysis
-- Skip: Mark as CONFIRMED_UNVERIFIED
+- Skip: Mark as confirmed_unverified
 - Note: "Feasibility analysis timed out"
 
 ---
