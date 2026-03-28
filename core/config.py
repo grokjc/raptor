@@ -17,6 +17,21 @@ class RaptorConfig:
     # Version
     VERSION = "3.0.0"
 
+    # Tool dependencies for startup checks
+    # severity: "required" = feature unavailable, "degrades" = feature limited
+    # group: tools in same group need at least one present
+    TOOL_DEPS = {
+        "afl++":    {"binary": "afl-fuzz",  "severity": "required", "affects": "/fuzz"},
+        "codeql":   {"binary": "codeql",    "group": "scanner",     "affects": "/codeql, /agentic"},
+        "gdb":      {"binary": "gdb",       "severity": "required", "affects": "/crash-analysis, /fuzz"},
+        "rr":       {"binary": "rr",        "severity": "degrades", "affects": "/crash-analysis"},
+        "semgrep":  {"binary": "semgrep",   "group": "scanner",     "affects": "/scan, /agentic"},
+    }
+
+    TOOL_GROUPS = {
+        "scanner": {"min_required": 1, "affects": "/scan, /agentic"},
+    }
+
     # Path Configuration
     REPO_ROOT = Path(__file__).resolve().parent.parent
     ENGINE_DIR = REPO_ROOT / "engine"

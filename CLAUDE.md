@@ -8,14 +8,11 @@ Dangerous operations (apply patches, delete, git push): ASK FIRST.
 ## SESSION START
 
 **On first message:**
-VERY IMPORTANT: follow these instructions one by one, in-order.
-1. Read `raptor-offset` as-is with no fixes or changes, display in code block
-2. Read `hackers-8ball`, display random line
-3. Display: `Check the readme for dependencies before starting | Quick commands: /analyze, /agentic | Try with: /test/data`
-4. Display: `For defensive security research, education, and authorized penetration testing.`
-5. Display: `raptor:~$` followed by the selected quote
-6. **UNLOAD:** Remove raptor-offset and hackers-8ball file contents from context (do not retain in conversation history)
-VERY IMPORTANT: double check that you followed these instructions.
+VERY IMPORTANT: follow these steps in order.
+1. Run `python3 raptor_startup.py >/dev/null 2>&1` (generates `.startup-output`)
+2. Read `.startup-output` using the Read tool, then output its contents verbatim as a fenced code block (``` with no language tag). Do NOT paraphrase or reformat.
+3. **UNLOAD:** Remove `.startup-output` contents from context (do not retain in conversation history)
+4. On a single line, output "Quick commands:" then list the /agentic, /scan, /fuzz, /web commands (don't explain what they do) and note /commands for the full list.
 
 ---
 
