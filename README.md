@@ -36,7 +36,7 @@
 
 
 **Authors:** Gadi Evron, Daniel Cuthbert, Thomas Dullien (Halvar Flake), Michael Bargury & John Cartwright
-(@gadievron, @danielcuthbert, @thomasdullien, @mbrg & @grokjc)
+([@gadievron](https://github.com/gadievron), [@danielcuthbert](https://github.com/danielcuthbert), [@thomasdullien](https://github.com/thomasdullien), [@mbrg](https://github.com/mbrg) & [@grokjc](https://github.com/grokjc))
 
 **License:** MIT (see LICENSE file)
 
@@ -268,30 +268,32 @@ docker build -f .devcontainer/Dockerfile -t raptor-devcontainer:latest .
 
 **Security testing:**
 ```
-/scan     - Static code analysis (Semgrep + CodeQL)
-/fuzz     - Binary fuzzing with AFL++
+/scan     - Static code analysis (Semgrep + CodeQL + LLM)
+/fuzz     - Binary fuzzing (AFL++ + crash analysis)
 /web      - Web application security testing (STUB - treat as alpha)
 /agentic  - Full autonomous workflow (analysis + exploit/patch generation)
 /codeql   - CodeQL-only deep analysis with dataflow
 /analyze  - LLM analysis only (no exploit/patch generation - 50% faster & cheaper)
+/validate - Exploitability validation pipeline
 ```
 
 **Exploit development & patching:**
 ```
-/exploit  - Generate exploit proof-of-concepts (beta)
-/patch    - Generate security patches for vulnerabilities (beta)
-/crash-analysis - Analyze an FFmpeg crash and generate a validated root-cause analysis
+/exploit - Generate exploit proof-of-concepts (beta)
+/patch   - Generate security patches for vulnerabilities (beta)
 ```
 
-**Forensics & investigation:**
+**Code understanding & forensics:**
 ```
-/oss-forensics - Evidence-backed forensic investigation for public GitHub repositories
+/understand     - Adversarial code comprehension: map attack surface, trace data flows, hunt variants
+/oss-forensics  - Evidence-backed forensic investigation for public GitHub repositories
+/crash-analysis - Autonomous crash root-cause analysis
 ```
 
 **Development & testing:**
 ```
-/create-skill    - Save custom approaches (experimental)
-/test-workflows  - Run comprehensive test suite (stub)
+/create-skill   - Save custom approaches (experimental)
+/test-workflows - Run comprehensive test suite (stub)
 ```
 
 **Expert personas:** (9 total, load on-demand)
@@ -418,7 +420,7 @@ python3 raptor.py fuzz --binary /path/to/binary --duration 3600
 
 ## Contribute
 
-RAPTOR is in alpha, and we welcome contributions from anyone, on anything.
+RAPTOR is in beta, and we welcome contributions from anyone, on anything.
 - Your idea here
 - Your second idea here
 
