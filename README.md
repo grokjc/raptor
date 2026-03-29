@@ -55,18 +55,19 @@ RAPTOR stands for Recursive Autonomous Penetration Testing and Observation Robot
 (We really wanted to name it RAPTOR)
 
 **RAPTOR autonomously**:
-1. **Scans** your code with Semgrep and CodeQL and tries dataflow validation
-2. **Fuzzes** your binaries with American Fuzzy Lop (AFL)
-3. **Analyses** vulnerabilities using advanced LLM reasoning
-4. **Exploits** by generating proof-of-concepts
-5. **Patches** with code to fix vulnerabilities
-6. **FFmpeg-specific** patching for Google's recent disclosure
+1. **Code Understanding:** Adversarial code comprehension — map attack surface, trace data flows, hunt for vulnerability variants
+2. **Scans** your code with Semgrep and CodeQL and tries dataflow validation
+3. **Fuzzes** your binaries with American Fuzzy Lop (AFL)
+4. **Analyses** vulnerabilities using advanced LLM reasoning
+5. **Exploits** by generating proof-of-concepts
+6. **Patches** with code to fix vulnerabilities
+7. **FFmpeg-specific** patching for Google's recent disclosure
    (https://news.ycombinator.com/item?id=45891016)
-7. **OSS Forensics** for evidence-backed GitHub repository investigations
-8. **Agentic Skills Engine** for security research & operations ([SecOpsAgentKit](https://github.com/AgentSecOps/SecOpsAgentKit))
-9. **Offensive Security Testing** via autonomous specialist agent with SecOpsAgentKit
-10. **Cost Management** with budget enforcement, real-time tracking, and quota detection
-11. **Reports** everything in structured formats
+8. **OSS Forensics** for evidence-backed GitHub repository investigations
+9. **Agentic Skills Engine** for security research & operations ([SecOpsAgentKit](https://github.com/AgentSecOps/SecOpsAgentKit))
+10. **Offensive Security Testing** via autonomous specialist agent with SecOpsAgentKit
+11. **Cost Management** with budget enforcement, real-time tracking, and quota detection
+12. **Reports** everything in structured formats
 
 RAPTOR combines traditional security tools with agentic automation and analysis, deeply
 understands your code, proves exploitability, and proposes patches.
@@ -89,10 +90,11 @@ Beyond RAPTOR's potential for autonomous security research and community collabo
 demonstrates how Claude Code can be adapted for **any purpose**, with RAPTOR packages.
 
 **Recent improvements:**
-- **LiteLLM Integration:** Unified LLM interface with Pydantic validation, smart model selection, and cost tracking
+- **Direct SDK Integration:** OpenAI + Anthropic SDKs with Pydantic validation, smart model selection, and cost tracking
 - **SecOpsAgentKit:** Offensive security specialist agent with comprehensive penetration testing capabilities
 - **Cost Management:** Budget enforcement, real-time callbacks, and intelligent quota detection
 - **Enhanced Reliability:** Multiple bug fixes improving robustness across CodeQL, static analysis, and LLM providers
+- **Code Understanding** We wanted to build more adversarial code comprehension, which allows you to map attack surface, trace those vital data flows & hunt for vulnerability variants
 
 ---
 
@@ -158,29 +160,28 @@ Try /analyze on one of our tests in /tests/data
 
 ## LLM Configuration & Cost Management
 
-RAPTOR uses LiteLLM for unified LLM provider integration with automatic fallback, cost tracking, and budget enforcement.
+RAPTOR uses the OpenAI and Anthropic SDKs directly for LLM provider integration with automatic fallback, cost tracking, and budget enforcement. Both SDKs are optional — RAPTOR works with just Claude Code installed.
 
 **Key Features:**
-- **Pydantic Validation:** YAML configs validated at load time with clear error messages
-- **Smart Model Selection:** Auto-selects best reasoning/thinking model from config
-- **Real-time Visibility:** Callbacks log model usage, tokens, duration for every call
+- **Direct SDK Integration:** OpenAI SDK for OpenAI/Gemini/Mistral/Ollama, Anthropic SDK for Claude
+- **Smart Model Selection:** Auto-selects best reasoning model from config or environment
+- **Structured Output:** Instructor + Pydantic fallback for reliable JSON responses
 - **Budget Enforcement:** Prevents exceeding cost limits with detailed error messages
 - **Quota Detection:** Intelligent rate limit detection with provider-specific guidance
-- **Cost Tracking:** Tracks costs across all LLM calls with per-request breakdown
+- **Cost Tracking:** Split input/output pricing with per-request breakdown
 
-**Configuration:**
-```yaml
-# litellm_config.yaml example
-model_list:
-  - model_name: claude-opus-4.5
-    litellm_params:
-      model: anthropic/claude-opus-4.5
-      api_key: ${ANTHROPIC_API_KEY}
-  - model_name: gpt-5.2-thinking
-    litellm_params:
-      model: openai/gpt-5.2-thinking
-      api_key: ${OPENAI_API_KEY}
+**Configuration (optional):**
+```json
+// ~/.config/raptor/models.json
+{
+  "models": [
+    {"provider": "anthropic", "model": "claude-opus-4-6", "api_key": "sk-ant-..."},
+    {"provider": "ollama", "model": "llama3:70b"}
+  ]
+}
 ```
+
+Or use environment variables: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY`
 
 **Budget Control:**
 ```python
@@ -190,8 +191,6 @@ config = LLMConfig(
     max_cost_per_scan=1.0  # Prevent exceeding $1 per scan
 )
 ```
-
-**See:** `docs/litellm-model-configuration-guide.md` for complete configuration guide
 
 ---
 
@@ -344,7 +343,7 @@ Usage: "Use [persona name]"
 
 Model selection and API use is handled through Claude Code natively.
 
-(very much) Eperimental benchmark for exploit generation:
+(very much) Experimental benchmark for exploit generation:
 
 | Provider             | Exploit Quality         | Cost        |
 |----------------------|-------------------------|-------------|
@@ -361,8 +360,10 @@ models work for analysis but may produce non-compilable exploit code.
 **LLM Configuration:**
 - `ANTHROPIC_API_KEY` - Anthropic Claude API key
 - `OPENAI_API_KEY` - OpenAI API key
+- `GEMINI_API_KEY` - Google Gemini API key
+- `MISTRAL_API_KEY` - Mistral API key
 - `OLLAMA_HOST` - Ollama server URL (default: `http://localhost:11434`)
-- `LITELLM_CONFIG_PATH` - Path to LiteLLM YAML configuration file (optional)
+- `RAPTOR_CONFIG` - Path to RAPTOR models JSON configuration file (optional)
 
 **Ollama Examples:**
 ```bash
@@ -407,9 +408,7 @@ python3 raptor.py fuzz --binary /path/to/binary --duration 3600
 - **CLAUDE_CODE_USAGE.md** - Complete Claude Code usage guide
 - **PYTHON_CLI.md** - Python command-line reference
 - **FUZZING_QUICKSTART.md** - Binary fuzzing guide
-- **litellm-model-configuration-guide.md** - LiteLLM configuration and model selection
 - **.claude/commands/oss-forensics.md** - OSS forensics investigation guide
-- **TESTING.md** - Test suite documentation and user stories
 
 ### Architecture & Development
 - **ARCHITECTURE.md** - Technical architecture details

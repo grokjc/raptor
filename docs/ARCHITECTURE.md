@@ -104,6 +104,8 @@ raptor/
 │   │       ├── __init__.py
 │   │       ├── client.py           # LLM client abstraction
 │   │       ├── config.py           # LLM configuration
+│   │       ├── detection.py        # LLM availability detection
+│   │       ├── model_data.py       # Model costs, limits, provider endpoints
 │   │       └── providers.py        # Provider implementations (Anthropic, OpenAI, etc.)
 │   │
 │   ├── autonomous/                 # Autonomous agent capabilities
@@ -386,7 +388,7 @@ python3 packages/codeql/agent.py \
 
 **Main Entry Points**:
 - `agent.py` - Standalone analysis (OpenAI/Anthropic compatible)
-- `orchestrator.py` - Multi-agent orchestration (requires Claude Code)
+- `orchestrator.py` - Phase 4 orchestration: dispatches claude -p sub-agents for parallel analysis (requires Claude Code)
 
 **CLI Interface (agent.py)**:
 ```bash
@@ -805,9 +807,10 @@ python3 raptor_agentic.py \
 ```
 
 **Workflow**:
-1. **Phase 1**: Scan code with Semgrep (`packages/static-analysis/scanner.py`)
-2. **Phase 2**: Analyze findings autonomously (`packages/llm-analysis/agent.py`)
-3. **Phase 3**: (Optional) Agentic orchestration with Claude Code (`packages/llm-analysis/orchestrator.py`)
+1. **Phase 1**: Scan code with Semgrep/CodeQL (`packages/static-analysis/scanner.py`)
+2. **Phase 2**: Exploitability validation (`packages/exploitability_validation/`)
+3. **Phase 3**: Autonomous analysis (`packages/llm_analysis/agent.py`) — full with external LLM, or prep-only when Phase 4 will orchestrate
+4. **Phase 4**: Orchestration (`packages/llm_analysis/orchestrator.py`) — dispatches claude -p sub-agents when no external LLM configured
 
 **Outputs**:
 - `raptor_agentic_report.json` - End-to-end summary
@@ -1110,7 +1113,7 @@ cd raptor
 pip install -r requirements.txt
 
 # Or install manually:
-pip install semgrep anthropic openai requests beautifulsoup4
+pip install semgrep anthropic openai instructor requests beautifulsoup4
 ```
 
 **Verify Installation**:

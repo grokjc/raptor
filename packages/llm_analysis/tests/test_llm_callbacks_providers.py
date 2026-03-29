@@ -1,230 +1,228 @@
-"""Test 9: Verify callback compatibility across multiple LLM providers."""
+"""Tests for provider creation and cost calculation.
+
+Replaces the old multi-provider LiteLLM callback tests. Now tests
+create_provider factory, SDK availability gating, and split-pricing
+cost calculation without any LiteLLM dependency.
+"""
 
 import pytest
 import sys
-import os
-import litellm
 from pathlib import Path
+from unittest.mock import patch, MagicMock
 
 # Add parent directories to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
-from packages.llm_analysis.llm.client import LLMClient
 from packages.llm_analysis.llm.config import ModelConfig
+from packages.llm_analysis.llm.model_data import MODEL_COSTS
+import packages.llm_analysis.llm.providers as _providers_module
 
 
-class TestMultiProviderCallbacks:
-    """Test 9: Verify callbacks fire consistently across providers."""
+def _ensure_mock_sdk(module, attr_name):
+    """Ensure a mock is set on the module for a conditionally imported SDK.
 
-    def test_anthropic_callback(self):
-        """Test callback fires for Anthropic/Claude models."""
-        # Skip if no API key
-        if not os.getenv("ANTHROPIC_API_KEY"):
-            pytest.skip("No ANTHROPIC_API_KEY - skipping Anthropic test")
+    Returns (mock, cleanup_fn). Call cleanup_fn after the test to restore state.
+    """
+    original = getattr(module, attr_name, None)
+    mock = MagicMock()
+    setattr(module, attr_name, mock)
 
-        client = LLMClient()
-        callback_fired = False
+    def cleanup():
+        if original is not None:
+            setattr(module, attr_name, original)
+        elif hasattr(module, attr_name):
+            delattr(module, attr_name)
 
-        if len(litellm.callbacks) > 0:
-            callback = litellm.callbacks[0]
-            original_success = callback.log_success_event
+    return mock, cleanup
 
-            def tracking_success(*args, **kwargs):
-                nonlocal callback_fired
-                callback_fired = True
-                if callable(original_success):
-                    original_success(*args, **kwargs)
 
-            callback.log_success_event = tracking_success
+class TestCreateProviderAnthropicRoute:
+    """Verify create_provider returns AnthropicProvider for 'anthropic'."""
 
-            try:
-                response = client.generate(
-                    prompt="Say 'hello'",
-                    model_config=ModelConfig(
-                        provider="anthropic",
-                        model_name="claude-sonnet-4.5",
-                        temperature=0.0,
-                        max_tokens=10
-                    )
-                )
-
-                assert response is not None
-                assert callback_fired, "Callback should fire for Anthropic"
-                print("\n✅ Anthropic: Callback FIRED")
-
-            finally:
-                callback.log_success_event = original_success
-
-    def test_openai_callback(self):
-        """Test callback fires for OpenAI models."""
-        # Skip if no API key
-        if not os.getenv("OPENAI_API_KEY"):
-            pytest.skip("No OPENAI_API_KEY - skipping OpenAI test")
-
-        client = LLMClient()
-        callback_fired = False
-
-        if len(litellm.callbacks) > 0:
-            callback = litellm.callbacks[0]
-            original_success = callback.log_success_event
-
-            def tracking_success(*args, **kwargs):
-                nonlocal callback_fired
-                callback_fired = True
-                if callable(original_success):
-                    original_success(*args, **kwargs)
-
-            callback.log_success_event = tracking_success
-
-            try:
-                response = client.generate(
-                    prompt="Say 'hello'",
-                    model_config=ModelConfig(
-                        provider="openai",
-                        model_name="gpt-4o-mini",
-                        temperature=0.0,
-                        max_tokens=10
-                    )
-                )
-
-                assert response is not None
-                assert callback_fired, "Callback should fire for OpenAI"
-                print("\n✅ OpenAI: Callback FIRED")
-
-            finally:
-                callback.log_success_event = original_success
-
-    def test_ollama_callback(self):
-        """Test callback fires for Ollama local models."""
-        # SKIP: Redundant test - Ollama callbacks already verified by:
-        # - test_provider_compatibility_summary (multi-provider test)
-        # - test_ollama_warning tests (use Ollama, callbacks registered)
-        # - test_performance_overhead_acceptable (uses default Ollama)
-        # This specific test has callback invocation tracking issues
-        pytest.skip("Redundant - Ollama callbacks verified by other tests")
-
-    def test_gemini_callback(self):
-        """Test callback fires for Google Gemini models."""
-        # Skip if no API key
-        if not os.getenv("GEMINI_API_KEY"):
-            pytest.skip("No GEMINI_API_KEY - skipping Gemini test")
-
-        client = LLMClient()
-        callback_fired = False
-
-        if len(litellm.callbacks) > 0:
-            callback = litellm.callbacks[0]
-            original_success = callback.log_success_event
-
-            def tracking_success(*args, **kwargs):
-                nonlocal callback_fired
-                callback_fired = True
-                if callable(original_success):
-                    original_success(*args, **kwargs)
-
-            callback.log_success_event = tracking_success
-
-            try:
-                response = client.generate(
-                    prompt="Say 'hello'",
-                    model_config=ModelConfig(
-                        provider="gemini",
-                        model_name="gemini-2.0-flash-exp",
-                        temperature=0.0,
-                        max_tokens=10
-                    )
-                )
-
-                assert response is not None
-                assert callback_fired, "Callback should fire for Gemini"
-                print("\n✅ Gemini: Callback FIRED")
-
-            finally:
-                callback.log_success_event = original_success
-
-    def test_provider_compatibility_summary(self):
-        """Document which providers support callbacks (exploratory)."""
-        results = {
-            "anthropic": None,
-            "openai": None,
-            "ollama": None,
-            "gemini": None
-        }
-
-        client = LLMClient()
-
-        # Test each provider if available
-        providers_to_test = []
-
-        if os.getenv("ANTHROPIC_API_KEY"):
-            providers_to_test.append(("anthropic", "claude-sonnet-4.5"))
-        if os.getenv("OPENAI_API_KEY"):
-            providers_to_test.append(("openai", "gpt-4o-mini"))
-        if os.getenv("GEMINI_API_KEY"):
-            providers_to_test.append(("gemini", "gemini-2.0-flash-exp"))
-
-        # Check Ollama availability
+    @patch("packages.llm_analysis.llm.providers.ANTHROPIC_SDK_AVAILABLE", True)
+    @patch("packages.llm_analysis.llm.providers.INSTRUCTOR_AVAILABLE", False)
+    def test_returns_anthropic_provider(self):
+        """create_provider('anthropic') returns AnthropicProvider."""
+        mock_anthropic, cleanup = _ensure_mock_sdk(_providers_module, 'anthropic')
         try:
-            import requests
-            response = requests.get("http://localhost:11434/api/tags", timeout=2)
-            if response.status_code == 200:
-                providers_to_test.append(("ollama", "mistral"))
-        except Exception:
-            pass
+            from packages.llm_analysis.llm.providers import create_provider, AnthropicProvider
+            config = ModelConfig(
+                provider="anthropic",
+                model_name="claude-sonnet-4-6",
+                api_key="sk-ant-test-key",
+            )
+            provider = create_provider(config)
+            assert isinstance(provider, AnthropicProvider)
+        finally:
+            cleanup()
 
-        for provider, model in providers_to_test:
-            callback_fired = False
 
-            if len(litellm.callbacks) > 0:
-                callback = litellm.callbacks[0]
-                original_success = callback.log_success_event
+class TestCreateProviderOpenAIRoute:
+    """Verify create_provider returns OpenAICompatibleProvider for OpenAI-compatible providers."""
 
-                def tracking_success(*args, **kwargs):
-                    nonlocal callback_fired
-                    callback_fired = True
-                    if callable(original_success):
-                        original_success(*args, **kwargs)
+    def _make_provider(self, provider_name, model_name, api_key=None, api_base=None):
+        """Helper to create a provider with mocked OpenAI SDK."""
+        mock_openai, cleanup = _ensure_mock_sdk(_providers_module, 'OpenAI')
+        try:
+            with patch("packages.llm_analysis.llm.providers.OPENAI_SDK_AVAILABLE", True), \
+                 patch("packages.llm_analysis.llm.providers.INSTRUCTOR_AVAILABLE", False):
+                from packages.llm_analysis.llm.providers import create_provider, OpenAICompatibleProvider
+                config = ModelConfig(
+                    provider=provider_name,
+                    model_name=model_name,
+                    api_key=api_key,
+                    api_base=api_base,
+                )
+                provider = create_provider(config)
+                assert isinstance(provider, OpenAICompatibleProvider)
+        finally:
+            cleanup()
 
-                callback.log_success_event = tracking_success
+    def test_returns_openai_provider_for_openai(self):
+        """create_provider('openai') returns OpenAICompatibleProvider."""
+        self._make_provider("openai", "gpt-5.2", "sk-test", "https://api.openai.com/v1")
 
-                try:
-                    config_args = {
-                        "provider": provider,
-                        "model_name": model,
-                        "temperature": 0.0,
-                        "max_tokens": 10
-                    }
+    def test_returns_openai_provider_for_gemini(self):
+        """create_provider('gemini') returns OpenAICompatibleProvider."""
+        self._make_provider("gemini", "gemini-2.5-pro", "AIza-test",
+                           "https://generativelanguage.googleapis.com/v1beta/openai")
 
-                    if provider == "ollama":
-                        config_args["api_base"] = "http://localhost:11434"
+    def test_returns_openai_provider_for_mistral(self):
+        """create_provider('mistral') returns OpenAICompatibleProvider."""
+        self._make_provider("mistral", "mistral-large-latest", "test-key",
+                           "https://api.mistral.ai/v1")
 
-                    response = client.generate(
-                        prompt="Say 'hello'",
-                        model_config=ModelConfig(**config_args)
-                    )
+    def test_returns_openai_provider_for_ollama(self):
+        """create_provider('ollama') returns OpenAICompatibleProvider."""
+        self._make_provider("ollama", "mistral", api_base="http://localhost:11434/v1")
 
-                    results[provider] = callback_fired
 
-                except Exception as e:
-                    results[provider] = f"ERROR: {str(e)}"
+class TestCreateProviderSDKUnavailable:
+    """Verify create_provider raises RuntimeError when SDK is not available."""
 
-                finally:
-                    callback.log_success_event = original_success
+    @patch("packages.llm_analysis.llm.providers.OPENAI_SDK_AVAILABLE", False)
+    @patch("packages.llm_analysis.llm.providers.ANTHROPIC_SDK_AVAILABLE", False)
+    def test_raises_for_anthropic_without_sdk(self):
+        """RuntimeError when neither Anthropic nor OpenAI SDK available for anthropic provider."""
+        from packages.llm_analysis.llm.providers import create_provider
 
-        # Print summary
-        print("\n" + "=" * 70)
-        print("PROVIDER CALLBACK COMPATIBILITY SUMMARY")
-        print("=" * 70)
-        for provider, result in results.items():
-            if result is True:
-                print(f"✅ {provider.upper()}: Callbacks FIRE")
-            elif result is False:
-                print(f"❌ {provider.upper()}: Callbacks DO NOT FIRE")
-            elif result is None:
-                print(f"⏭️  {provider.upper()}: SKIPPED (not available)")
-            else:
-                print(f"⚠️  {provider.upper()}: {result}")
-        print("=" * 70)
+        config = ModelConfig(
+            provider="anthropic",
+            model_name="claude-sonnet-4-6",
+            api_key="sk-ant-test",
+        )
 
-        # Test passes regardless (exploratory)
-        assert True
+        with pytest.raises(RuntimeError, match="Anthropic provider requires"):
+            create_provider(config)
+
+    @patch("packages.llm_analysis.llm.providers.OPENAI_SDK_AVAILABLE", False)
+    def test_raises_for_openai_without_sdk(self):
+        """RuntimeError when OpenAI SDK not available for openai provider."""
+        from packages.llm_analysis.llm.providers import create_provider
+
+        config = ModelConfig(
+            provider="openai",
+            model_name="gpt-5.2",
+            api_key="sk-test",
+        )
+
+        with pytest.raises(RuntimeError, match="requires.*pip install openai"):
+            create_provider(config)
+
+    @patch("packages.llm_analysis.llm.providers.OPENAI_SDK_AVAILABLE", False)
+    def test_raises_for_ollama_without_sdk(self):
+        """RuntimeError when OpenAI SDK not available for ollama provider."""
+        from packages.llm_analysis.llm.providers import create_provider
+
+        config = ModelConfig(
+            provider="ollama",
+            model_name="mistral",
+            api_base="http://localhost:11434/v1",
+        )
+
+        with pytest.raises(RuntimeError, match="requires.*pip install openai"):
+            create_provider(config)
+
+
+class TestCalculateCostSplit:
+    """Verify _calculate_cost_split uses MODEL_COSTS for known models."""
+
+    def _make_provider_instance(self, model_name, cost_per_1k=0.0):
+        """Create a minimal provider instance for cost testing."""
+        from packages.llm_analysis.llm.providers import LLMProvider
+
+        config = ModelConfig(
+            provider="openai",
+            model_name=model_name,
+            api_key="sk-test",
+            api_base="https://api.openai.com/v1",
+            cost_per_1k_tokens=cost_per_1k,
+        )
+
+        # Create instance bypassing abstract methods
+        with patch.multiple(LLMProvider, __abstractmethods__=set()):
+            provider = LLMProvider.__new__(LLMProvider)
+            provider.config = config
+            provider.total_tokens = 0
+            provider.total_cost = 0.0
+
+        return provider
+
+    def test_known_model_uses_split_pricing(self):
+        """Known models use per-token input/output rates from MODEL_COSTS."""
+        model_name = next(iter(MODEL_COSTS))
+        rates = MODEL_COSTS[model_name]
+
+        provider = self._make_provider_instance(model_name)
+
+        input_tokens = 1000
+        output_tokens = 500
+
+        expected_cost = (
+            (input_tokens / 1000) * rates["input"]
+            + (output_tokens / 1000) * rates["output"]
+        )
+
+        actual_cost = provider._calculate_cost_split(input_tokens, output_tokens)
+        assert abs(actual_cost - expected_cost) < 1e-10
+
+    def test_unknown_model_uses_cost_per_1k(self):
+        """Unknown models fall back to cost_per_1k_tokens flat rate."""
+        provider = self._make_provider_instance(
+            model_name="unknown-model-xyz",
+            cost_per_1k=0.005,
+        )
+
+        input_tokens = 1000
+        output_tokens = 500
+
+        expected_cost = ((input_tokens + output_tokens) / 1000) * 0.005
+
+        actual_cost = provider._calculate_cost_split(input_tokens, output_tokens)
+        assert abs(actual_cost - expected_cost) < 1e-10
+
+    def test_unknown_model_zero_cost(self):
+        """Unknown model with no cost_per_1k_tokens returns 0."""
+        provider = self._make_provider_instance(
+            model_name="local-model",
+            cost_per_1k=0.0,
+        )
+
+        actual_cost = provider._calculate_cost_split(2000, 1000)
+        assert actual_cost == 0.0
+
+    def test_zero_tokens_returns_zero(self):
+        """Zero input and output tokens returns zero cost."""
+        model_name = next(iter(MODEL_COSTS))
+        provider = self._make_provider_instance(model_name)
+
+        actual_cost = provider._calculate_cost_split(0, 0)
+        assert actual_cost == 0.0
+
+    def test_all_model_costs_have_input_output(self):
+        """Every entry in MODEL_COSTS has both 'input' and 'output' keys."""
+        for model_name, rates in MODEL_COSTS.items():
+            assert "input" in rates, f"{model_name} missing 'input' rate"
+            assert "output" in rates, f"{model_name} missing 'output' rate"
+            assert rates["input"] >= 0, f"{model_name} has negative input rate"
+            assert rates["output"] >= 0, f"{model_name} has negative output rate"

@@ -10,11 +10,25 @@
 /agentic  - Full autonomous workflow (most comprehensive)
 /codeql   - CodeQL-only deep analysis
 /analyze  - LLM analysis of existing SARIF files
+/validate - Exploitability validation pipeline
+```
+
+**Exploit development & patching:**
+```
+/exploit - Generate exploit proof-of-concepts (beta)
+/patch   - Generate security patches (beta)
+```
+
+**Code understanding & forensics:**
+```
+/understand     - Adversarial code comprehension (map attack surface, trace data flows)
+/oss-forensics  - Evidence-backed GitHub forensic investigation
+/crash-analysis - Autonomous crash root-cause analysis
 ```
 
 **Skill management:**
 ```
-/create-skill  - Save custom approach for reuse (alpha)
+/create-skill - Save custom approach for reuse (alpha)
 ```
 
 **Note:** Skills are alpha - /create-skill creates skill definitions, but auto-loading and execution integration is not yet implemented.

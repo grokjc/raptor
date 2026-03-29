@@ -24,6 +24,7 @@ VERY IMPORTANT: double check that you followed these instructions.
 /scan /fuzz /web /agentic /codeql /analyze - Security testing
 /exploit /patch - Generate PoCs and fixes (beta)
 /validate - Exploitability validation pipeline (see below)
+/understand - Code understanding: map attack surface, trace flows, hunt variants (see below)
 
 **Note:** `/agentic` now automatically runs exploitability validation (Phase 2) between scanning and analysis. Use `--skip-validation` to bypass.
 /crash-analysis - Autonomous crash root-cause analysis (see below)
@@ -114,6 +115,31 @@ The `/validate` command validates that vulnerability findings are real, reachabl
 
 ---
 
+## CODE UNDERSTANDING
+
+The `/understand` command provides deep, adversarial code comprehension for security research.
+
+**Usage:** `/understand <target> [--map] [--trace <entry>] [--hunt <pattern>] [--teach <subject>] [--out <dir>]`
+
+**Modes:**
+- `--map` — Build context: entry points, trust boundaries, sinks → `context-map.json`
+- `--trace <entry>` — Follow one data flow source → sink with full call chain → `flow-trace-<id>.json`
+- `--hunt <pattern>` — Find all variants of a pattern across the codebase → `variants.json`
+- `--teach <subject>` — Explain a framework, library, or pattern in depth (inline)
+
+**Skills** (in `.claude/skills/code-understanding/`):
+- `SKILL.md` — Gates, config, output format
+- `map.md` — Entry point enumeration, trust boundary mapping, sink catalog
+- `trace.md` — Step-by-step data flow tracing with branch coverage
+- `hunt.md` — Structural, semantic, and root-cause variant analysis
+- `teach.md` — Framework/pattern explanation with security conclusion
+
+**Output:** `.out/code-understanding-<timestamp>/`
+
+**Pipeline integration:** Planned — output schemas are aligned with validation pipeline formats for future integration.
+
+---
+
 ## PROGRESSIVE LOADING
 
 **When scan completes:** Load `tiers/analysis-guidance.md` (adversarial thinking)
@@ -122,6 +148,7 @@ The `/validate` command validates that vulnerability findings are real, reachabl
 **When developing exploits:** Load `tiers/exploit-guidance.md` (constraints, techniques)
 **When errors occur:** Load `tiers/recovery.md` (recovery protocol)
 **When requested:** Load `tiers/personas/[name].md` (expert personas)
+**When running /understand:** Load `.claude/skills/code-understanding/SKILL.md` (gates, config) plus the relevant mode file: `map.md`, `trace.md`, `hunt.md`, or `teach.md`
 
 ---
 
