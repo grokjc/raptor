@@ -7,22 +7,11 @@ with unchecked flows shown as dashed edges.
 
 from __future__ import annotations
 
-import json
 from core.json import load_json
 from pathlib import Path
 from typing import Any
 
-
-def _sanitize(text: str) -> str:
-    """Escape characters that break Mermaid node labels."""
-    return (
-        text.replace('"', "'")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("{", "(")
-            .replace("}", ")")
-            .replace("\n", " ")
-    )
+from .sanitize import sanitize as _sanitize
 
 
 def _node_id(prefix: str, index: int) -> str:
@@ -42,13 +31,15 @@ def generate(data: dict[str, Any]) -> str:
     if not entry_points and data.get("sources"):
         entry_points = [
             {"id": f"EP-{i+1:03d}", "type": s.get("type", "source"),
-             "path": s.get("entry", "unknown"), "file": "", "line": ""}
+             "path": s.get("entry") or s.get("description") or s.get("name") or "unknown",
+             "file": "", "line": ""}
             for i, s in enumerate(data["sources"])
         ]
     if not sink_details and data.get("sinks"):
         sink_details = [
             {"id": f"SINK-{i+1:03d}", "type": s.get("type", "sink"),
-             "operation": s.get("location", "unknown"), "file": "", "line": ""}
+             "operation": s.get("location") or s.get("description") or s.get("name") or "unknown",
+             "file": "", "line": ""}
             for i, s in enumerate(data["sinks"])
         ]
 

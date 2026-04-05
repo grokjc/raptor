@@ -28,6 +28,7 @@ from .flow_trace import generate as generate_flow_trace, generate_from_file as f
 from .attack_tree import generate as generate_attack_tree, generate_from_file as attack_tree_from_file
 from .attack_paths import generate as generate_attack_paths, generate_from_file as attack_paths_from_file
 from .hypotheses import generate as generate_hypotheses, generate_from_file as hypotheses_from_file
+from .findings_summary import generate_verdict_pie, generate_type_pie
 
 __all__ = [
     "render_and_write",
@@ -37,6 +38,8 @@ __all__ = [
     "generate_attack_tree",
     "generate_attack_paths",
     "generate_hypotheses",
+    "generate_verdict_pie",
+    "generate_type_pie",
     "context_map_from_file",
     "flow_trace_from_file",
     "attack_tree_from_file",

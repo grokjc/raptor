@@ -7,22 +7,11 @@ with branches shown as splits and sink nodes styled distinctly.
 
 from __future__ import annotations
 
-import json
 from core.json import load_json
 from pathlib import Path
 from typing import Any
 
-
-def _sanitize(text: str) -> str:
-    return (
-        str(text)
-        .replace('"', "'")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace("{", "(")
-        .replace("}", ")")
-        .replace("\n", " ")
-    )
+from .sanitize import sanitize as _sanitize
 
 
 def _step_label(step: dict[str, Any]) -> str:

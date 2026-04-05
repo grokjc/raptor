@@ -9,23 +9,11 @@ outcomes, not just whether a node is "confirmed".
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 from core.json import load_json
-
-
-def _sanitize(text: str) -> str:
-    return (
-        str(text)
-        .replace('"', "'")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace("{", "(")
-        .replace("}", ")")
-        .replace("\n", " ")
-    )
+from .sanitize import sanitize as _sanitize
 
 
 _STATUS_SYMBOL = {
@@ -83,7 +71,7 @@ def generate(hypotheses: list[dict[str, Any]]) -> str:
     lines = ["flowchart TD"]
 
     hyp_node_ids: dict[str, str] = {}  # hyp id → mermaid node id
-    pred_node_ids: list[tuple[str, str]] = []  # (hyp_node_id, pred_node_id)
+    pred_node_ids: list[tuple[str, str, str]] = []  # (hyp_node_id, pred_node_id, pred_status)
 
     node_counter = [0]
 
@@ -115,7 +103,7 @@ def generate(hypotheses: list[dict[str, Any]]) -> str:
                 lines.append(f'{indent}{pnid}["{plabel}"]')
             else:
                 lines.append(f'{indent}{pnid}(("{plabel}"))')
-            pred_node_ids.append((nid, pnid))
+            pred_node_ids.append((nid, pnid, pstatus))
 
         return nid
 
@@ -137,7 +125,7 @@ def generate(hypotheses: list[dict[str, Any]]) -> str:
     # Edges
     lines.append("")
     lines.append("    %% Prediction edges")
-    for hyp_nid, pred_nid in pred_node_ids:
+    for hyp_nid, pred_nid, _pstatus in pred_node_ids:
         lines.append(f"    {hyp_nid} --> {pred_nid}")
 
     # Style classes
@@ -173,6 +161,14 @@ def generate(hypotheses: list[dict[str, Any]]) -> str:
         lines.append(f"    class {','.join(disproven_nodes)} disproven")
     if testing_nodes:
         lines.append(f"    class {','.join(testing_nodes)} testing")
+
+    # Apply prediction status classes
+    pred_by_status: dict[str, list[str]] = {}
+    for _hyp_nid, pred_nid, pstatus in pred_node_ids:
+        key = f"pred_{pstatus}" if pstatus in ("confirmed", "disproven", "testing") else "pred_testing"
+        pred_by_status.setdefault(key, []).append(pred_nid)
+    for cls, ids in pred_by_status.items():
+        lines.append(f"    class {','.join(ids)} {cls}")
 
     return "\n".join(lines)
 

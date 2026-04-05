@@ -14,23 +14,11 @@ are confirmed vs theoretical, or adding more info about blockers.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 from core.json import load_json
-
-
-def _sanitize(text: str) -> str:
-    return (
-        str(text)
-        .replace('"', "'")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace("{", "(")
-        .replace("}", ")")
-        .replace("\n", " ")
-    )
+from .sanitize import sanitize as _sanitize
 
 
 _PROXIMITY_LABEL = {

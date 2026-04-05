@@ -183,7 +183,7 @@ from pathlib import Path
 out_file = render_and_write(Path(".out/code-understanding-20240101/"), target="myapp")
 ```
 
-**When to run:** After `/understand --map`, `/understand --trace`, or a full `/validate` run. Can be run on any output directory — it auto-discovers what JSON files are present and renders only those.
+**When to run:** Diagrams are auto-generated at the end of `/validate` and `/understand --map`/`--trace`. Use `/diagram <dir>` to re-render after manual edits to JSON outputs.
 
 ---
 

@@ -11,7 +11,7 @@ from typing import Any, Optional
 
 from core.json import load_json as _load_json
 
-from . import context_map, flow_trace, attack_tree, attack_paths, hypotheses
+from . import context_map, flow_trace, attack_tree, attack_paths, hypotheses, findings_summary
 
 
 _FLOW_TRACE_GLOB = "flow-trace-*.json"
@@ -29,6 +29,31 @@ def render_directory(out_dir: Path, target: Optional[str] = None) -> str:
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     target_str = f" for `{target}`" if target else ""
     sections.append(f"# Security Diagrams{target_str}\n\n_Generated {now}_\n")
+
+    # --- Findings summary pies (exec summary, shown first) ---
+    findings_path = out_dir / "findings.json"
+    orch_path_early = out_dir / "orchestrated_report.json"
+    summary_findings = None
+    if findings_path.exists():
+        fdata = _load_json(findings_path)
+        if fdata and isinstance(fdata, dict):
+            summary_findings = fdata.get("findings", [])
+    elif orch_path_early.exists():
+        odata = _load_json(orch_path_early)
+        if odata and isinstance(odata, dict):
+            summary_findings = [r for r in odata.get("results", []) if "is_true_positive" in r]
+
+    if summary_findings and len(summary_findings) >= 2:
+        try:
+            verdict = findings_summary.generate_verdict_pie(summary_findings)
+            vtype = findings_summary.generate_type_pie(summary_findings)
+            body = (
+                f"```mermaid\n{verdict}\n```\n\n"
+                f"```mermaid\n{vtype}\n```"
+            )
+            sections.append(_section("Findings Summary", body))
+        except Exception as exc:
+            sections.append(_section("Findings Summary", f"> Could not render: {exc}"))
 
     # --- Context map / attack surface ---
     for fname, title in [

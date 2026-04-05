@@ -7,22 +7,11 @@ proximity score, and any blockers. WIP: we may want to add more details, e.g. sh
 
 from __future__ import annotations
 
-import json
 from core.json import load_json
 from pathlib import Path
 from typing import Any
 
-
-def _sanitize(text: str) -> str:
-    return (
-        str(text)
-        .replace('"', "'")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace("{", "(")
-        .replace("}", ")")
-        .replace("\n", " ")
-    )
+from .sanitize import sanitize as _sanitize
 
 
 _PROXIMITY_LABEL = {

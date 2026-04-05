@@ -84,4 +84,12 @@ All JSON outputs write to `$WORKDIR` (`.out/code-understanding-<timestamp>/` by 
 | `context-map.json` | `--map` | Entry points, trust boundaries, sinks |
 | `flow-trace-<id>.json` | `--trace` | Step-by-step data flow with attacker control assessment |
 | `variants.json` | `--hunt` | All pattern matches, taint status, root-cause groups |
+| `diagrams.md` | `--map`, `--trace` | Mermaid diagrams (auto-generated) |
 | *(none)* | `--teach` | Inline explanation — no file written |
+
+**After writing JSON outputs** for `--map` or `--trace`, generate diagrams:
+```python
+from packages.diagram import render_and_write
+from pathlib import Path
+render_and_write(Path(workdir))
+```

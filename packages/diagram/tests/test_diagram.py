@@ -7,12 +7,100 @@ from pathlib import Path
 
 import pytest
 
+from ..sanitize import sanitize
+from ..findings_summary import generate_verdict_pie, generate_type_pie
 from ..context_map import generate as gen_context_map
 from ..flow_trace import generate as gen_flow_trace
 from ..attack_tree import generate as gen_attack_tree
 from ..attack_paths import generate as gen_attack_paths, generate_single
 from ..hypotheses import generate as gen_hypotheses
 from ..renderer import render_directory, render_and_write
+
+
+# ---------------------------------------------------------------------------
+# sanitize tests
+# ---------------------------------------------------------------------------
+
+class TestSanitize:
+    def test_quotes_replaced(self):
+        assert '"' not in sanitize('say "hello"')
+
+    def test_angle_brackets_escaped(self):
+        assert "&lt;" in sanitize("<script>")
+        assert "&gt;" in sanitize("</script>")
+
+    def test_braces_replaced(self):
+        assert "{" not in sanitize("if (x) { y }")
+        assert "}" not in sanitize("if (x) { y }")
+
+    def test_newlines_removed(self):
+        assert "\n" not in sanitize("line1\nline2")
+
+    def test_non_string_input(self):
+        assert sanitize(42) == "42"
+        assert sanitize(None) == "None"
+
+    def test_truncation(self):
+        long = "a" * 100
+        result = sanitize(long, max_len=20)
+        assert len(result) == 20
+        assert result.endswith("...")
+
+    def test_no_truncation_by_default(self):
+        long = "a" * 200
+        assert len(sanitize(long)) == 200
+
+
+# ---------------------------------------------------------------------------
+# findings_summary tests
+# ---------------------------------------------------------------------------
+
+class TestFindingsSummary:
+    def test_verdict_pie(self):
+        findings = [
+            {"ruling": {"status": "exploitable"}},
+            {"ruling": {"status": "confirmed"}},
+            {"ruling": {"status": "ruled_out"}},
+        ]
+        out = generate_verdict_pie(findings)
+        assert "pie title Finding Verdicts" in out
+        assert "Exploitable" in out
+        assert "Confirmed" in out
+        assert "Ruled Out" in out
+
+    def test_verdict_pie_colours(self):
+        findings = [
+            {"ruling": {"status": "exploitable"}},
+            {"ruling": {"status": "confirmed"}},
+        ]
+        out = generate_verdict_pie(findings)
+        assert "init" in out
+        assert "#dc2626" in out  # exploitable red
+        assert "#f97316" in out  # confirmed orange
+
+    def test_type_pie(self):
+        findings = [
+            {"vuln_type": "buffer_overflow"},
+            {"vuln_type": "buffer_overflow"},
+            {"vuln_type": "xss"},
+        ]
+        out = generate_type_pie(findings)
+        assert "pie title Vulnerability Types" in out
+        assert "Buffer Overflow" in out
+        assert "Cross-Site Scripting" in out
+
+    def test_empty(self):
+        out = generate_verdict_pie([])
+        assert "No findings" in out
+
+    def test_agentic_format(self):
+        findings = [
+            {"is_true_positive": True, "is_exploitable": True},
+            {"is_true_positive": False},
+        ]
+        out = generate_verdict_pie(findings)
+        assert "Exploitable" in out
+        assert "False Positive" in out
 
 
 # ---------------------------------------------------------------------------
@@ -533,6 +621,20 @@ class TestRenderer:
         out = render_directory(tmp_path)
         assert "Hypotheses" in out
         assert "HYPO-001" in out
+
+    def test_render_findings_summary_pies(self, tmp_path):
+        self._make_out_dir(tmp_path, {"findings.json": {
+            "findings": [
+                {"ruling": {"status": "exploitable"}, "vuln_type": "buffer_overflow"},
+                {"ruling": {"status": "confirmed"}, "vuln_type": "buffer_overflow"},
+                {"ruling": {"status": "ruled_out"}, "vuln_type": "xss"},
+            ]
+        }})
+        out = render_directory(tmp_path)
+        assert "Findings Summary" in out
+        assert "Finding Verdicts" in out
+        assert "Vulnerability Types" in out
+        assert out.count("pie title") == 2
 
     def test_corrupt_json_handled_gracefully(self, tmp_path):
         (tmp_path / "context-map.json").write_text("{corrupt json", encoding="utf-8")

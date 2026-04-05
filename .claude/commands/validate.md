@@ -75,13 +75,16 @@ Validates that vulnerability findings are real, reachable, and exploitable befor
    - Fix any issues found, add `stage_f_review` field to corrected findings
    - **Do not write validation-report.md** — Stage 1 generates it
 
-8. **Stage 1 (Python):** Outputs - CVSS scoring, schema validation, report generation
+8. **Stage 1 (Python):** Outputs - CVSS scoring, schema validation, report generation, diagrams
    ```python
    from packages.exploitability_validation.report import write_validation_report
+   from packages.diagram import render_and_write
+   from pathlib import Path
    write_validation_report(output_dir)
+   render_and_write(Path(output_dir))
    ```
    Then read `{output_dir}/summary.txt` using the Read tool and output its contents verbatim.
-   Output: `validation-report.md`, findings summary displayed in chat
+   Output: `validation-report.md`, `diagrams.md`, findings summary displayed in chat
 
 ### Write Results Back
 
