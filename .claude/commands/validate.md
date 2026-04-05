@@ -83,8 +83,13 @@ Validates that vulnerability findings are real, reachable, and exploitable befor
    write_validation_report(output_dir)
    render_and_write(Path(output_dir))
    ```
-   Then read `{output_dir}/summary.txt` using the Read tool and output its contents verbatim.
-   Output: `validation-report.md`, `diagrams.md`, findings summary displayed in chat
+   Then read `{output_dir}/validation-report.md` and add a 1-2 sentence summary paragraph
+   after the `# Exploitability Validation Report` header — e.g., "All 3 buffer overflows are
+   real and reachable. 2 are directly exploitable; the third is constrained by RELRO." Use only
+   facts from the findings data. The report should stand on its own without this paragraph.
+
+   Finally, read `{output_dir}/summary.txt` using the Read tool and output its contents verbatim.
+   Output: `validation-report.md`, findings summary displayed in chat
 
 ### Write Results Back
 
