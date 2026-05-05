@@ -179,6 +179,14 @@ def _run_analyse(argv: List[str]) -> int:
     args = _parse_analyse_args(argv)
     _configure_logging(args.verbose)
 
+    # --no-llm umbrella: disable every LLM stage in one switch.
+    if getattr(args, "no_llm", False):
+        args.skip_review = True
+        args.skip_triage = True
+        args.review_maintainers = False
+        args.llm_inline_installs = False
+        args.impact_analysis = False
+
     # Propagate ``--trust-repo`` to the process-wide flag so any
     # cc_trust.check_repo_claude_trust() call later in the run honours
     # it (e.g., future sandbox-gated resolver invocations).
@@ -408,6 +416,13 @@ def _parse_analyse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--skip-triage", action="store_true",
         help="skip LLM triage ranking of findings",
+    )
+    parser.add_argument(
+        "--no-llm", action="store_true",
+        help="umbrella: disable every LLM stage (equivalent to "
+             "--skip-review --skip-triage and forces off "
+             "--review-maintainers / --llm-inline-installs / "
+             "--impact-analysis even if specified)",
     )
     parser.add_argument(
         "--review-maintainers", action="store_true",

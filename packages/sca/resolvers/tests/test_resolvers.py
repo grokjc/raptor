@@ -210,6 +210,120 @@ def test_pip_resolver_failure(monkeypatch, tmp_path: Path) -> None:
     assert "Cannot satisfy" in (res.error or "")
 
 
+def test_pep668_detection() -> None:
+    """`_is_pep668_failure` matches the marker substrings pip emits."""
+    from packages.sca.resolvers.pip import _is_pep668_failure
+    # Real-world stderr from system pip on Debian / Ubuntu.
+    assert _is_pep668_failure(
+        "error: externally-managed-environment\n"
+        "× This environment is externally managed\n"
+    )
+    # Case insensitive.
+    assert _is_pep668_failure("EXTERNALLY-MANAGED-ENVIRONMENT")
+    # Doesn't false-positive on unrelated errors.
+    assert not _is_pep668_failure("ERROR: No matching distribution")
+    assert not _is_pep668_failure("")
+    assert not _is_pep668_failure(None or "")
+
+
+def _make_pep668_plan(venv_dir: Path, lockfile_text: str = "django==4.2.10\n"):
+    """Build a fake-run plan that simulates the PEP 668 fallback path.
+
+    The venv-create matcher creates ``<venv>/bin/python`` on the disk so
+    the resolver's existence check passes when it runs after the mock
+    venv command. ``shutil.rmtree`` may have wiped a pre-existing dir
+    just before, so creation has to happen inside the matcher.
+    """
+    pep668_stderr = (
+        "error: externally-managed-environment\n"
+        "× This environment is externally managed\n"
+    )
+
+    def _create_files_then_succeed(cmd):
+        bin_dir = venv_dir / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        (bin_dir / "python").touch()
+        (bin_dir / "pip-compile").touch()
+        return _FakeProc(returncode=0)
+
+    return [
+        (lambda c: c == ["pip", "--version"],
+         _FakeProc(returncode=0, stdout="pip 23.0")),
+        (lambda c: c == ["pip-compile", "--version"],
+         _FakeProc(returncode=0, stdout="pip-compile 7.0")),
+        # First pip-compile — system Python, refused by PEP 668.
+        (lambda c: c[0] == "pip-compile" and "--output-file" in c,
+         _FakeProc(returncode=1, stderr=pep668_stderr)),
+        # venv create — also creates the bin/python file the resolver
+        # checks for after the call returns.
+        (lambda c: len(c) >= 3 and c[1:3] == ["-m", "venv"],
+         _create_files_then_succeed),
+        # ensurepip bootstrap
+        (lambda c: "ensurepip" in c,
+         _FakeProc(returncode=0)),
+        # pip install pip-tools inside the venv
+        (lambda c: "pip-tools" in c,
+         _FakeProc(returncode=0)),
+        # venv pip-compile retry — succeeds.
+        (lambda c: c[0].endswith("pip-compile") and "--output-file" in c,
+         _FakeProc(returncode=0, stdout=lockfile_text)),
+    ]
+
+
+def _patch_run_with_callable(monkeypatch, plan):
+    """Same as ``_patch_run`` but tolerates plan entries whose result is
+    a callable (called with cmd to produce the _FakeProc on the fly)."""
+    calls = []
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        for matcher, result in plan:
+            if matcher(cmd):
+                if callable(result):
+                    return result(cmd)
+                return result
+        return _FakeProc(returncode=1)
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    return calls
+
+
+def test_pip_compile_pep668_falls_back_to_venv(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    """System pip-compile blocked by PEP 668 → resolver retries via
+    an ephemeral venv and succeeds."""
+    import os as _os
+    (tmp_path / "requirements.txt").write_text(
+        "django>=4.0\n", encoding="utf-8")
+    venv_dir = tmp_path / f".raptor-sca-venv-{_os.getpid()}"
+    _patch_run_with_callable(monkeypatch, _make_pep668_plan(venv_dir))
+
+    res = PipResolver().dry_run(tmp_path)
+    assert res.success is True, \
+        f"expected success, got error: {res.error!r}"
+    assert res.proposed_lockfile is not None
+    assert b"django==4.2.10" in res.proposed_lockfile
+
+
+def test_pep668_fallback_cleans_up_venv(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    """The ephemeral venv directory is removed after the resolver
+    finishes, success or failure."""
+    import os as _os
+    (tmp_path / "requirements.txt").write_text(
+        "django>=4.0\n", encoding="utf-8")
+    venv_dir = tmp_path / f".raptor-sca-venv-{_os.getpid()}"
+    _patch_run_with_callable(monkeypatch, _make_pep668_plan(venv_dir))
+
+    PipResolver().dry_run(tmp_path)
+
+    # Venv directory should be removed.
+    assert not venv_dir.exists(), (
+        f"venv leaked at {venv_dir}; contents: "
+        f"{list(venv_dir.rglob('*')) if venv_dir.exists() else '(gone)'}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Go
 # ---------------------------------------------------------------------------

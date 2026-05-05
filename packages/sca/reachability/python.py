@@ -25,6 +25,7 @@ from __future__ import annotations
 import ast
 import json
 import logging
+import warnings
 import os
 import re
 from pathlib import Path
@@ -34,18 +35,13 @@ from ..models import Confidence, Reachability
 
 logger = logging.getLogger(__name__)
 
-# Directories we never descend into. Mirrors discovery.EXCLUDED_DIR_NAMES
-# but specialised for source walks (we keep things like ``packages/`` —
-# they're legitimate source roots in monorepos).
-_EXCLUDED_DIRS: Set[str] = {
-    "node_modules", "vendor", "bower_components",
-    ".git", ".svn", ".hg",
-    "target", "build", "dist", "out", "_build",
-    "__pycache__", ".tox", ".venv", "venv", ".env",
-    ".pytest_cache", ".mypy_cache", ".ruff_cache",
-    ".gradle", ".idea", ".vscode",
-    ".angular", ".next", ".nuxt", ".cache", ".turbo",
-    "site-packages",   # any virtualenv that snuck in
+# Directories we never descend into. Sourced from the canonical
+# discovery.EXCLUDED_DIR_NAMES (which already includes ``.claude``,
+# build/cache/vcs dirs, etc.); we add ``site-packages`` for any
+# virtualenv that snuck in under a non-canonical name.
+from ..discovery import EXCLUDED_DIR_NAMES
+_EXCLUDED_DIRS: Set[str] = EXCLUDED_DIR_NAMES | {
+    "site-packages",
 }
 
 # Filename / directory patterns that mark test code. Reachability through
@@ -122,7 +118,13 @@ def scan_imports(
             logger.debug("sca.reachability.python: skip %s (%s)", py_file, e)
             continue
         try:
-            tree = ast.parse(text, filename=str(py_file))
+            # Suppress SyntaxWarning (invalid escape sequences,
+            # ``is`` with literals, etc.) from the parsed file. Those
+            # are issues in the SCANNED source, not in raptor-sca; they
+            # leak to operator stderr otherwise and create noise.
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", SyntaxWarning)
+                tree = ast.parse(text, filename=str(py_file))
         except SyntaxError as e:
             logger.debug(
                 "sca.reachability.python: ast parse failed for %s: %s",

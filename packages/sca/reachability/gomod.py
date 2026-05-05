@@ -178,8 +178,9 @@ def _imports_in(text: str) -> Iterable[Tuple[str, int]]:
 def _walk_go_sources(
     target: Path, *, max_depth: int,
 ) -> Iterable[Path]:
+    from ..discovery import EXCLUDED_DIR_NAMES
     root_depth = len(target.parts)
-    skip_dirs = {"vendor", "node_modules", ".git", "__pycache__", "out"}
+    skip_dirs = EXCLUDED_DIR_NAMES
     for dirpath, dirnames, filenames in os.walk(str(target), followlinks=False):
         cur = Path(dirpath)
         if len(cur.parts) - root_depth >= max_depth:

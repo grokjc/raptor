@@ -116,11 +116,11 @@ def _grep_call_sites(target: Path, dep: Dependency) -> List[str]:
     if not import_patterns:
         return []
 
+    from ..discovery import EXCLUDED_DIR_NAMES
     results: List[str] = []
     extensions = {".py", ".js", ".ts", ".jsx", ".tsx", ".java", ".go",
                   ".rs", ".rb", ".php", ".cs"}
-    skip_dirs = {"node_modules", "vendor", ".git", "__pycache__",
-                 "target", "build", "dist", ".venv", "venv"}
+    skip_dirs = EXCLUDED_DIR_NAMES
 
     for root, dirs, files in os.walk(target, onerror=lambda _e: None):
         dirs[:] = [d for d in dirs if d not in skip_dirs]

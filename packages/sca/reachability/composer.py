@@ -170,9 +170,11 @@ def _to_pascal(name: str) -> str:
 def _walk_php_sources(
     target: Path, *, max_depth: int,
 ) -> Iterable[Path]:
+    from ..discovery import EXCLUDED_DIR_NAMES
     root_depth = len(target.parts)
-    skip_dirs = {"vendor", "node_modules", ".git", "__pycache__",
-                  "var", "cache"}
+    # PHP-specific extras: ``var/`` (Symfony cache+logs) and the bare
+    # ``cache`` dir (some frameworks use it for compiled templates).
+    skip_dirs = EXCLUDED_DIR_NAMES | {"var", "cache"}
     for dirpath, dirnames, filenames in os.walk(str(target), followlinks=False):
         cur = Path(dirpath)
         if len(cur.parts) - root_depth >= max_depth:

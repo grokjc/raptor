@@ -41,15 +41,12 @@ logger = logging.getLogger(__name__)
 _DATA_FILE = Path(__file__).resolve().parent.parent / "data" / \
     "exfil_destinations.json"
 
-_EXCLUDED_DIRS: Set[str] = {
-    "node_modules", "vendor", "bower_components",
-    ".git", ".svn", ".hg",
-    "target", "build", "dist", "out", "_build",
-    "__pycache__", ".tox", ".venv", "venv", ".env",
-    ".pytest_cache", ".mypy_cache", ".ruff_cache",
-    ".gradle", ".idea", ".vscode",
-    ".angular", ".next", ".nuxt", ".cache", ".turbo",
-    "site-packages",
+from ..discovery import EXCLUDED_DIR_NAMES
+
+# Canonical skip set + this walker's extras. Drift-free: a new entry
+# in discovery.EXCLUDED_DIR_NAMES propagates to every walker.
+_EXCLUDED_DIRS: Set[str] = EXCLUDED_DIR_NAMES | {
+    "site-packages",        # any virtualenv that snuck in
 }
 
 # Files we'll scan. Source + config. Exclude binary / archive types.

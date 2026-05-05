@@ -29,7 +29,7 @@ from collections import Counter
 from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Sequence, Tuple
 
 from .findings import severity_rank
 from .sarif import write_sarif
@@ -234,26 +234,49 @@ def _render_vuln_table(buf: StringIO, rows: List[Dict[str, Any]]) -> None:
 
 
 def _render_kind_table(buf: StringIO, rows: List[Dict[str, Any]]) -> None:
-    ordered = sorted(
-        rows,
-        key=lambda r: (
-            -severity_rank(r.get("severity") or "info"),
+    # Collapse identical (severity, kind, ecosystem, name) rows that
+    # share the same detail — a dep loose-pinned across both
+    # ``requirements.txt`` and ``requirements-dev.txt`` produces two
+    # findings with the same description; rendering both is just
+    # noise for human readers (the per-manifest detail is in
+    # findings.json for tooling). When multiple rows collapse, the
+    # detail is suffixed with `(in N manifests)`.
+    from collections import defaultdict
+
+    groups: Dict[Tuple[Any, ...], List[Dict[str, Any]]] = defaultdict(list)
+    for r in rows:
+        sca = r.get("sca") or {}
+        key = (
+            (r.get("severity") or "info").lower(),
             r.get("vuln_type") or "",
-            (r.get("sca") or {}).get("name") or "",
-        ),
+            sca.get("ecosystem") or "",
+            sca.get("name") or "",
+            (r.get("description") or ""),
+            bool(r.get("suppressed")),
+        )
+        groups[key].append(r)
+
+    ordered_keys = sorted(
+        groups.keys(),
+        key=lambda k: (-severity_rank(k[0]), k[1], k[3]),
     )
+
     buf.write("| Severity | Kind | Dep | Detail |\n")
     buf.write("|---|---|---|---|\n")
-    for r in ordered:
-        sev = (r.get("severity") or "info").title()
-        if r.get("suppressed"):
+    for key in ordered_keys:
+        members = groups[key]
+        first = members[0]
+        sev = (first.get("severity") or "info").title()
+        if first.get("suppressed"):
             sev += " (suppressed)"
-        kind = (r.get("vuln_type") or "").rsplit(":", 1)[-1]
-        sca = r.get("sca") or {}
+        kind = (first.get("vuln_type") or "").rsplit(":", 1)[-1]
+        sca = first.get("sca") or {}
         dep = f"{sca.get('ecosystem','')}:{sca.get('name','')}"
-        detail = (r.get("description") or "").replace("|", "\\|")
+        detail = (first.get("description") or "").replace("|", "\\|")
         if len(detail) > 90:
             detail = detail[:87] + "..."
+        if len(members) > 1:
+            detail = f"{detail} (in {len(members)} manifests)"
         buf.write(f"| {sev} | {kind} | {dep} | {detail} |\n")
     buf.write("\n")
 

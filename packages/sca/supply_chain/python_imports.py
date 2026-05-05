@@ -37,6 +37,7 @@ from __future__ import annotations
 import ast
 import logging
 import os
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Set
@@ -46,15 +47,12 @@ from ..models import Confidence, Dependency, Manifest, PinStyle
 logger = logging.getLogger(__name__)
 
 
-_EXCLUDED_DIRS: Set[str] = {
-    "node_modules", "vendor", "bower_components",
-    ".git", ".svn", ".hg",
-    "target", "build", "dist", "out", "_build",
-    "__pycache__", ".tox", ".venv", "venv", ".env",
-    ".pytest_cache", ".mypy_cache", ".ruff_cache",
-    ".gradle", ".idea", ".vscode",
-    ".angular", ".next", ".nuxt", ".cache", ".turbo",
-    "site-packages",
+from ..discovery import EXCLUDED_DIR_NAMES
+
+# Canonical skip set + this walker's extras. Drift-free: a new entry
+# in discovery.EXCLUDED_DIR_NAMES propagates to every walker.
+_EXCLUDED_DIRS: Set[str] = EXCLUDED_DIR_NAMES | {
+    "site-packages",        # any virtualenv that snuck in
 }
 
 # Test-path detection shared with reachability + other supply_chain
@@ -130,7 +128,12 @@ def scan_target(
             )
             continue
         try:
-            tree = ast.parse(text, filename=str(path))
+            # Suppress SyntaxWarning from scanned source — those are
+            # the target's hygiene issues, not raptor-sca's, and leak
+            # to operator stderr as confusing noise.
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", SyntaxWarning)
+                tree = ast.parse(text, filename=str(path))
         except SyntaxError as e:
             logger.debug(
                 "sca.supply_chain.python_imports: parse failed for %s: %s",

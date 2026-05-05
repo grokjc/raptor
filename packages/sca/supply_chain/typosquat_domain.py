@@ -60,10 +60,10 @@ _TEST_DIR_NAMES = {
     "tests", "test", "__tests__", "spec", "specs", "fixtures",
 }
 
-_SKIP_DIRS = {
-    "node_modules", "vendor", ".git", "__pycache__", "venv",
-    ".venv", "build", "dist", "out", "target", ".tox",
-}
+from ..discovery import EXCLUDED_DIR_NAMES
+
+# Canonical skip set — drift-free with discovery.EXCLUDED_DIR_NAMES.
+_SKIP_DIRS = EXCLUDED_DIR_NAMES
 
 _EXTENSIONS = {".py", ".js", ".ts", ".sh", ".bash", ".rb", ".go",
                 ".rs", ".php", ".cs", ".java", ".kt", ".gradle",

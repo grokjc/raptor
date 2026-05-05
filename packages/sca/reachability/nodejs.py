@@ -53,16 +53,10 @@ _REQUIRE_RE = re.compile(
     re.VERBOSE | re.MULTILINE | re.DOTALL,
 )
 
-# Directories we never descend into.
-_EXCLUDED_DIRS: Set[str] = {
-    "node_modules", "vendor", "bower_components",
-    ".git", ".svn", ".hg",
-    "target", "build", "dist", "out", "_build",
-    "__pycache__", ".tox", ".venv", "venv",
-    ".pytest_cache", ".mypy_cache", ".ruff_cache",
-    ".gradle", ".idea", ".vscode",
-    ".angular", ".next", ".nuxt", ".cache", ".turbo",
-}
+# Directories we never descend into. Sourced from the canonical
+# discovery.EXCLUDED_DIR_NAMES so a new entry there propagates here.
+from ..discovery import EXCLUDED_DIR_NAMES
+_EXCLUDED_DIRS: Set[str] = EXCLUDED_DIR_NAMES
 
 _TEST_DIR_NAMES: Set[str] = {"tests", "test", "__tests__", "spec", "e2e"}
 _TEST_FILE_RE = re.compile(r".*\.(test|spec)\.[mc]?[jt]sx?$")

@@ -35,19 +35,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Set
 
+from ..discovery import EXCLUDED_DIR_NAMES
 from ..models import Confidence, Dependency, Manifest, PinStyle
 
 logger = logging.getLogger(__name__)
 
-_EXCLUDED_DIRS: Set[str] = {
-    "node_modules", "vendor", "bower_components",
-    ".git", ".svn", ".hg",
-    "target", "build", "dist", "out", "_build",
-    "__pycache__", ".tox", ".venv", "venv", ".env",
-    ".pytest_cache", ".mypy_cache", ".ruff_cache",
-    ".gradle", ".idea", ".vscode",
-    ".angular", ".next", ".nuxt", ".cache", ".turbo",
-    "site-packages",
+# Canonical skip set + this walker's extras. Drift-free: a new entry
+# in discovery.EXCLUDED_DIR_NAMES propagates to every walker.
+_EXCLUDED_DIRS: Set[str] = EXCLUDED_DIR_NAMES | {
+    "site-packages",        # any virtualenv that snuck in
 }
 
 _TEST_DIR_NAMES: Set[str] = {"tests", "test", "__tests__", "spec", "e2e"}

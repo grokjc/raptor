@@ -165,6 +165,11 @@ def _parse_analyse(argv):
                    help="skip LLM behavioural review stages")
     p.add_argument("--skip-triage", action="store_true",
                    help="skip LLM triage ranking of findings")
+    p.add_argument("--no-llm", action="store_true",
+                   help="umbrella: disable every LLM stage (equivalent to "
+                        "--skip-review --skip-triage and forces off "
+                        "--review-maintainers / --llm-inline-installs / "
+                        "--impact-analysis even if specified)")
     p.add_argument("--review-maintainers", action="store_true",
                    help="run LLM maintainer-trust review on all direct deps")
     p.add_argument("--llm-inline-installs", action="store_true",
@@ -195,6 +200,17 @@ def _resolve_target(explicit):
 def _run_analyse(argv):
     args = _parse_analyse(argv)
     _configure_logging(args.verbose)
+
+    # --no-llm is the umbrella switch operators reach for when they
+    # want a mechanical-only run (CI-fast-path, offline diagnosis,
+    # fresh-eyes audit). Translate it into the underlying per-stage
+    # flags so every LLM call site honours it without per-site changes.
+    if args.no_llm:
+        args.skip_review = True
+        args.skip_triage = True
+        args.review_maintainers = False
+        args.llm_inline_installs = False
+        args.impact_analysis = False
 
     target = _resolve_target(args.target)
     if target is None:

@@ -134,9 +134,13 @@ def _imports_in(suffix: str, text: str) -> Iterable[Tuple[str, int]]:
 def _walk_dotnet_sources(
     target: Path, *, max_depth: int,
 ) -> Iterable[Path]:
+    from ..discovery import EXCLUDED_DIR_NAMES
     root_depth = len(target.parts)
-    skip_dirs = {"bin", "obj", "node_modules", ".git", "__pycache__",
-                  "packages"}
+    # .NET-specific extras: ``bin``/``obj`` (build outputs) and the
+    # bare ``packages`` dir (NuGet's per-project install location —
+    # shadows the canonical "monorepo packages/ is legitimate" rule
+    # only inside .NET tree walks).
+    skip_dirs = EXCLUDED_DIR_NAMES | {"bin", "obj", "packages"}
     suffixes = {".cs", ".fs", ".vb"}
     for dirpath, dirnames, filenames in os.walk(str(target), followlinks=False):
         cur = Path(dirpath)

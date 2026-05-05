@@ -153,6 +153,7 @@ def _run(
     timeout: int,
     proxy_hosts: Sequence[str],
     env: Optional[dict] = None,
+    block_network: bool = False,
 ) -> subprocess.CompletedProcess:
     """Run a resolver subprocess sandboxed.
 
@@ -178,21 +179,29 @@ def _run(
     """
     from core.sandbox.context import run as sandbox_run
 
-    return sandbox_run(
-        cmd,
-        cwd=str(cwd),
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=env,
-        target=str(cwd),
-        output=str(cwd),
-        use_egress_proxy=True,
-        proxy_hosts=list(proxy_hosts),
-        restrict_reads=True,
-        fake_home=True,
-        caller_label="sca-resolver",
-    )
+    # When the call is local-only (e.g. ``python -m venv``,
+    # ``ensurepip``), pass ``block_network=True`` and skip the proxy
+    # entirely — the sandbox refuses ``use_egress_proxy=True`` with an
+    # empty allowlist, and we don't want network anyway.
+    sandbox_kwargs = {
+        "cwd": str(cwd),
+        "capture_output": True,
+        "text": True,
+        "timeout": timeout,
+        "env": env,
+        "target": str(cwd),
+        "output": str(cwd),
+        "restrict_reads": True,
+        "fake_home": True,
+        "caller_label": "sca-resolver",
+    }
+    if block_network or not proxy_hosts:
+        sandbox_kwargs["block_network"] = True
+    else:
+        sandbox_kwargs["use_egress_proxy"] = True
+        sandbox_kwargs["proxy_hosts"] = list(proxy_hosts)
+
+    return sandbox_run(cmd, **sandbox_kwargs)
 
 
 # ---------------------------------------------------------------------------

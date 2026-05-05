@@ -64,6 +64,8 @@ EXCLUDED_DIR_NAMES: Set[str] = {
     ".cache",
     ".turbo",
     ".claude",         # Claude Code agent worktrees + ephemeral state
+    "codeql_dbs",      # CodeQL DB cache — 10K+ index files per database
+    "codeql_db",       # singular variant used by some configurations
 }
 
 # Filenames that hint a directory is dependency-related junk we should
@@ -254,7 +256,14 @@ def _walk(root: Path, max_depth: int, excludes: Set[str]) -> Iterator[Path]:
 
 
 def _should_skip_dir(name: str, excludes: Set[str]) -> bool:
-    """Return True if a directory name matches an exclusion."""
+    """Return True if a directory name matches an exclusion.
+
+    Also matches the ephemeral PEP 668 venv directory left behind if a
+    crashed prior run didn't clean up — the resolver creates these as
+    ``.raptor-sca-venv-<pid>`` so the suffix varies per run.
+    """
+    if name.startswith(".raptor-sca-venv-"):
+        return True
     if name.startswith(".") and name in excludes:
         return True
     return name in excludes
