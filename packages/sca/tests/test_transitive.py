@@ -318,3 +318,206 @@ def test_per_ecosystem_independent_decisions(tmp_path, monkeypatch):
     # PEP 503: parser normalises "py_trans" → "py-trans".
     assert any(d.name == "py-trans" for d in deps)
     assert all(d.ecosystem != "npm" for d in deps)
+
+
+# ---------------------------------------------------------------------------
+# Batched cascade dispatch — shared venv, parallel manifests
+# ---------------------------------------------------------------------------
+
+
+def test_dry_run_batch_default_loops_dry_run():
+    """The free-function default for resolvers without
+    ``SUPPORTS_BATCH`` falls back to a sequential ``dry_run`` loop.
+    Defends the fallback so non-PipResolver consumers (npm, Maven,
+    Cargo, …) keep working without per-resolver opt-in."""
+    from packages.sca.resolvers import dry_run_batch
+
+    class _StubNoBatch:
+        def __init__(self):
+            self.calls: list = []
+
+        def dry_run(self, project_dir, *, timeout=120):
+            self.calls.append(project_dir)
+            return ResolverResult(
+                ecosystem="PyPI", success=True, available=True,
+                proposed_lockfile=b"x==1.0\n",
+            )
+
+    stub = _StubNoBatch()
+    out = dry_run_batch(stub, [Path("/p1"), Path("/p2"), Path("/p3")])
+    assert len(out) == 3
+    assert all(r.success for r in out)
+    assert stub.calls == [Path("/p1"), Path("/p2"), Path("/p3")]
+
+
+def test_dry_run_batch_uses_class_flag_not_attr_presence():
+    """Resolvers opt into batching via class-level
+    ``SUPPORTS_BATCH = True``. Mere attribute presence (e.g. a
+    MagicMock auto-attr) must NOT trigger the batch path —
+    ``list(MagicMock())`` returns an empty list, which would silently
+    zero out test results."""
+    from packages.sca.resolvers import dry_run_batch
+    from unittest.mock import MagicMock
+
+    fake = MagicMock()
+    fake.is_available.return_value = True
+    fake.dry_run.return_value = ResolverResult(
+        ecosystem="PyPI", success=True, available=True,
+        proposed_lockfile=b"x==1.0\n",
+    )
+    out = dry_run_batch(fake, [Path("/p1"), Path("/p2")])
+    assert len(out) == 2
+    assert all(r.success for r in out)
+    assert fake.dry_run.call_count == 2
+
+
+def test_dry_run_batch_uses_resolver_method_when_flag_set():
+    """When ``SUPPORTS_BATCH=True`` the free function delegates to
+    the resolver's ``dry_run_batch`` and returns its result verbatim
+    (no extra wrapping)."""
+    from packages.sca.resolvers import dry_run_batch
+
+    class _StubBatch:
+        SUPPORTS_BATCH = True
+
+        def __init__(self):
+            self.calls: list = []
+
+        def dry_run(self, *a, **kw):
+            raise AssertionError("dry_run shouldn't be called")
+
+        def dry_run_batch(self, project_dirs, *, common_root=None,
+                          timeout=120):
+            self.calls.append((tuple(project_dirs), common_root, timeout))
+            return [
+                ResolverResult(
+                    ecosystem="PyPI", success=True, available=True,
+                    proposed_lockfile=f"{p}==1.0\n".encode(),
+                ) for p in project_dirs
+            ]
+
+    stub = _StubBatch()
+    out = dry_run_batch(
+        stub, [Path("/a"), Path("/b")], common_root=Path("/"),
+    )
+    assert len(out) == 2
+    assert stub.calls == [((Path("/a"), Path("/b")), Path("/"), 120)]
+
+
+def test_dry_run_batch_falls_back_when_batch_raises():
+    """A buggy ``dry_run_batch`` must not abort the scan — the free
+    function catches and falls back to sequential ``dry_run``. The
+    operator sees a warning + complete results, never a crash."""
+    from packages.sca.resolvers import dry_run_batch
+
+    class _StubBuggyBatch:
+        SUPPORTS_BATCH = True
+
+        def __init__(self):
+            self.dry_run_calls = 0
+
+        def dry_run_batch(self, project_dirs, *, common_root=None,
+                          timeout=120):
+            raise RuntimeError("simulated batch crash")
+
+        def dry_run(self, project_dir, *, timeout=120):
+            self.dry_run_calls += 1
+            return ResolverResult(
+                ecosystem="PyPI", success=True, available=True,
+                proposed_lockfile=b"x==1.0\n",
+            )
+
+    stub = _StubBuggyBatch()
+    out = dry_run_batch(stub, [Path("/p1"), Path("/p2")])
+    assert len(out) == 2
+    assert all(r.success for r in out)
+    assert stub.dry_run_calls == 2
+
+
+# ---------------------------------------------------------------------------
+# _common_ancestor — sandbox cwd sizing
+# ---------------------------------------------------------------------------
+
+
+def test_common_ancestor_single_path_returns_self():
+    from packages.sca.transitive import _common_ancestor
+    assert _common_ancestor([Path("/a/b/c")]) == Path("/a/b/c")
+
+
+def test_common_ancestor_multiple_paths_finds_shared_prefix(tmp_path):
+    from packages.sca.transitive import _common_ancestor
+    (tmp_path / "a/x").mkdir(parents=True)
+    (tmp_path / "a/y/z").mkdir(parents=True)
+    common = _common_ancestor([tmp_path / "a/x", tmp_path / "a/y/z"])
+    assert common == (tmp_path / "a").resolve()
+
+
+def test_common_ancestor_disjoint_paths_returns_root():
+    from packages.sca.transitive import _common_ancestor
+    common = _common_ancestor([Path("/x/y"), Path("/p/q")])
+    assert common == Path("/")
+
+
+# ---------------------------------------------------------------------------
+# Cross-ecosystem parallel dispatch
+# ---------------------------------------------------------------------------
+
+
+def test_cross_ecosystem_parallel_runs_concurrently(tmp_path, monkeypatch):
+    """Two ecosystems' batches dispatch on separate threads. Each
+    cascade sleeps briefly to simulate the sandbox subprocess; the
+    total wallclock is bounded by the slower one, not the sum.
+
+    Defends the cross-ecosystem parallelism — without threads each
+    ecosystem's batch would serialise behind the previous one."""
+    import time as _time
+    from packages.sca.transitive import _run_cascades_parallel
+
+    def fake_try(eco, work_items):
+        _time.sleep(0.3)
+        return [(pd, host, [], None) for pd, host in work_items]
+
+    monkeypatch.setattr(
+        "packages.sca.transitive._try_cascade_batch", fake_try,
+    )
+
+    work = {
+        "PyPI": [(tmp_path / "a", tmp_path / "a/req.txt")],
+        "npm":  [(tmp_path / "b", tmp_path / "b/pkg.json")],
+    }
+    t0 = _time.time()
+    out = _run_cascades_parallel(work)
+    elapsed = _time.time() - t0
+    assert ("PyPI", tmp_path / "a") in out
+    assert ("npm", tmp_path / "b") in out
+    # Sequential would be ~0.6s; parallel should be ~0.3s. Generous
+    # slack for CI noise but still detects serialisation.
+    assert elapsed < 0.55, f"expected parallel <0.55s, got {elapsed:.2f}s"
+
+
+def test_cross_ecosystem_one_crashes_others_proceed(tmp_path, monkeypatch):
+    """A crash in one ecosystem's batch shouldn't take down the
+    others. The crashed ecosystem gets per-item failure rows so
+    downstream can still emit a meaningful TransitiveStatus."""
+    from packages.sca.transitive import _run_cascades_parallel
+
+    def fake_try(eco, work_items):
+        if eco == "PyPI":
+            raise RuntimeError("PyPI batch blew up")
+        return [(pd, host, [], None) for pd, host in work_items]
+
+    monkeypatch.setattr(
+        "packages.sca.transitive._try_cascade_batch", fake_try,
+    )
+
+    work = {
+        "PyPI": [(tmp_path / "a", tmp_path / "a/req.txt")],
+        "npm":  [(tmp_path / "b", tmp_path / "b/pkg.json")],
+    }
+    out = _run_cascades_parallel(work)
+    py = out[("PyPI", tmp_path / "a")]
+    assert py[0] is None
+    assert "blew up" in (py[1] or "")
+    npm = out[("npm", tmp_path / "b")]
+    assert npm[0] == []
+    assert npm[1] is None

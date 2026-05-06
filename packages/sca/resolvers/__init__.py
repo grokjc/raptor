@@ -123,6 +123,48 @@ class Resolver(Protocol):
         ...
 
 
+def dry_run_batch(
+    resolver: "Resolver",
+    project_dirs: Sequence[Path],
+    *,
+    common_root: Optional[Path] = None,
+    timeout: int = 120,
+) -> "list[ResolverResult]":
+    """Resolve N project_dirs and return one ``ResolverResult`` per
+    input dir, in input order.
+
+    Default behaviour is a sequential loop calling ``dry_run`` per
+    project_dir — sandbox-correct but slow. Resolvers that can amortise
+    cross-manifest setup (e.g. :class:`PipResolver` builds one shared
+    venv and runs N pip-compile calls inside it) opt in by setting
+    a class-level ``SUPPORTS_BATCH = True`` and providing a
+    ``dry_run_batch(project_dirs, *, common_root, timeout)`` method.
+
+    Opt-in marker rather than just ``hasattr(resolver, "dry_run_batch")``
+    because attribute presence isn't safe to detect on duck-typed
+    resolvers (``unittest.mock.MagicMock`` auto-creates the attribute,
+    and ``list(MagicMock())`` returns ``[]`` rather than raising — a
+    silent zero-result trap). The class-level flag is explicit and
+    test-stub-safe.
+    """
+    if getattr(type(resolver), "SUPPORTS_BATCH", False):
+        try:
+            return list(resolver.dry_run_batch(    # type: ignore[attr-defined]
+                list(project_dirs),
+                common_root=common_root, timeout=timeout,
+            ))
+        except Exception as e:                          # noqa: BLE001
+            # Defensive: a buggy batch impl falls back to sequential
+            # rather than aborting the whole scan. Logged so the
+            # operator can spot if the fast path ever stops working.
+            logger.warning(
+                "sca.resolvers: %s.dry_run_batch failed (%s); "
+                "falling back to sequential dry_run",
+                type(resolver).__name__, e,
+            )
+    return [resolver.dry_run(p, timeout=timeout) for p in project_dirs]
+
+
 # ---------------------------------------------------------------------------
 # Shared subprocess helper
 # ---------------------------------------------------------------------------

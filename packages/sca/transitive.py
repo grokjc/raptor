@@ -124,6 +124,13 @@ def expand_missing_transitives(
             continue
         by_eco_dir.setdefault((m.ecosystem, m.path.parent), []).append(m)
 
+    # First filter pass: drop entries with sibling lockfile / disabled
+    # resolver. Build per-ecosystem work lists for the cascade pass —
+    # one resolver per ecosystem can amortise its setup cost (e.g.
+    # PipResolver builds ONE shared venv across N manifests instead
+    # of one per manifest), so dispatching by ecosystem rather than
+    # by (ecosystem, project_dir) is what unlocks batching.
+    cascade_work: Dict[str, List[Tuple[Path, Path]]] = {}
     for (eco, project_dir), eco_manifests in by_eco_dir.items():
         if (eco, project_dir) in lockfile_dirs:
             statuses.append(TransitiveStatus(
@@ -139,6 +146,31 @@ def expand_missing_transitives(
                 reason="--no-resolve-transitive set and metadata-walk fallback off",
             ))
             continue
+        cascade_work.setdefault(eco, []).append(
+            (project_dir, eco_manifests[0].path),
+        )
+
+    # Cascade pass — one batch per ecosystem, dispatched in parallel
+    # across ecosystems via threads. Each ecosystem's batch holds the
+    # GIL only briefly to launch the sandbox subprocess, then sleeps
+    # in ``select.epoll`` waiting for it to finish — so threads work
+    # fine here even though Python is GIL-bound. The
+    # cross-ecosystem parallelism matters for polyglot projects;
+    # within an ecosystem, batched dry_run_batch already runs the
+    # per-manifest pip-compile calls concurrently inside one
+    # sandbox session.
+    cascade_results: Dict[Tuple[str, Path], Tuple[Optional[List[Dependency]], Optional[str]]] = {}
+    if cascade_work and enable_resolver:
+        cascade_results = _run_cascades_parallel(cascade_work)
+
+    # Second pass: emit transitives + statuses per (eco, project_dir).
+    # ``by_eco_dir`` is the original work list; we look up cascade
+    # results by key. Ordering of statuses still matches input order.
+    for (eco, project_dir), eco_manifests in by_eco_dir.items():
+        if (eco, project_dir) in lockfile_dirs:
+            continue                        # already statused above
+        if not enable_resolver and not enable_metadata_fallback:
+            continue                        # already statused above
 
         added: List[Dependency] = []
         method = "skipped_no_method_succeeded"
@@ -146,11 +178,9 @@ def expand_missing_transitives(
         failures = 0
         cascade_reason: Optional[str] = None
 
-        # Cascade resolver — produces a real lockfile via the
-        # ecosystem's own toolchain.
         if enable_resolver:
-            cascade_deps, cascade_reason = _try_cascade(
-                eco, project_dir, eco_manifests[0].path,
+            cascade_deps, cascade_reason = cascade_results.get(
+                (eco, project_dir), (None, None),
             )
             if cascade_deps is not None:
                 added = cascade_deps
@@ -198,6 +228,164 @@ def expand_missing_transitives(
         ))
 
     return new_transitives, statuses
+
+
+def _run_cascades_parallel(
+    cascade_work: Dict[str, List[Tuple[Path, Path]]],
+) -> Dict[Tuple[str, Path], Tuple[Optional[List[Dependency]], Optional[str]]]:
+    """Dispatch one batched cascade per ecosystem in parallel.
+
+    Within each ecosystem the resolver's ``dry_run_batch`` (when it
+    has one) shares setup cost across manifests; across ecosystems
+    we use threads because each batch sleeps on its sandbox
+    subprocess.
+
+    Returns ``{(ecosystem, project_dir): (deps_or_None, reason_or_None)}``
+    for every input work item. Call sites match by key.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    out: Dict[Tuple[str, Path], Tuple[Optional[List[Dependency]], Optional[str]]] = {}
+    if not cascade_work:
+        return out
+
+    # Bound concurrency at the number of ecosystems. ThreadPoolExecutor
+    # context manager joins on exit so per-batch exceptions surface
+    # back to the orchestrator.
+    with ThreadPoolExecutor(
+        max_workers=max(1, len(cascade_work)),
+        thread_name_prefix="sca-cascade",
+    ) as pool:
+        futs = {
+            pool.submit(_try_cascade_batch, eco, items): eco
+            for eco, items in cascade_work.items()
+        }
+        for fut in futs:
+            eco = futs[fut]
+            try:
+                results = fut.result()
+            except Exception as e:                      # noqa: BLE001
+                # Defensive: a batch crash shouldn't abort the whole
+                # transitive pass — surface as a failure for every
+                # work item in that ecosystem so the per-manifest
+                # status row carries a meaningful reason.
+                logger.warning(
+                    "transitive: cascade batch crashed for %s: %s", eco, e,
+                )
+                for project_dir, _host in cascade_work[eco]:
+                    out[(eco, project_dir)] = (
+                        None, f"cascade batch crashed: {e}",
+                    )
+                continue
+            for (pd, _host, deps, reason) in results:
+                out[(eco, pd)] = (deps, reason)
+    return out
+
+
+def _try_cascade_batch(
+    ecosystem: str,
+    work_items: List[Tuple[Path, Path]],
+) -> List[Tuple[Path, Path, Optional[List[Dependency]], Optional[str]]]:
+    """Run cascade resolution for every (project_dir, host_manifest)
+    in a single ecosystem. Uses ``dry_run_batch`` so resolvers that
+    support shared-setup batching (currently :class:`PipResolver`)
+    amortise venv-creation across the batch.
+
+    Returns ``[(project_dir, host_manifest, deps_or_None, reason_or_None), ...]``
+    aligned with ``work_items``.
+    """
+    _ensure_lockfile_parsers_loaded()
+    from .resolvers import dry_run_batch as _dry_run_batch, get_resolver
+
+    out: List[Tuple[Path, Path, Optional[List[Dependency]], Optional[str]]] = []
+    if not work_items:
+        return out
+
+    project_dirs = [pd for pd, _ in work_items]
+    resolver = get_resolver(ecosystem, project_dir=project_dirs[0])
+    if resolver is None:
+        for pd, host in work_items:
+            out.append(
+                (pd, host, None,
+                 f"no cascade resolver registered for {ecosystem}"),
+            )
+        return out
+    if not resolver.is_available():
+        for pd, host in work_items:
+            out.append(
+                (pd, host, None,
+                 f"{ecosystem} toolchain not installed (cascade resolver "
+                 f"requires it for transitive resolution)"),
+            )
+        return out
+    parser = _LOCKFILE_PARSERS.get(ecosystem)
+    if parser is None:
+        for pd, host in work_items:
+            out.append(
+                (pd, host, None,
+                 f"no lockfile parser wired for {ecosystem}; transitive "
+                 f"data was generated but cannot be ingested"),
+            )
+        return out
+
+    # Common ancestor of every project_dir lets the sandbox cover
+    # them all in one ``target=common_root`` session. When
+    # ``dry_run_batch`` finds it can't honour the batch (mismatched
+    # paths, single item, no-batch resolver), it falls back to
+    # sequential per-dir ``dry_run`` automatically.
+    common_root = _common_ancestor(project_dirs)
+    results = _dry_run_batch(
+        resolver, project_dirs, common_root=common_root,
+    )
+    for (pd, host), result in zip(work_items, results):
+        if not result.success:
+            out.append((
+                pd, host, None,
+                f"{ecosystem} resolver failed: "
+                f"{(result.error or 'unknown error')[:140]}",
+            ))
+            continue
+        if result.proposed_lockfile is None:
+            out.append((
+                pd, host, None,
+                f"{ecosystem} resolver succeeded but produced no "
+                f"lockfile bytes (transitive ingest not possible)",
+            ))
+            continue
+        deps = _parse_lockfile_bytes(
+            ecosystem, result.proposed_lockfile, parser, host,
+        )
+        if deps is None:
+            out.append((
+                pd, host, None,
+                f"{ecosystem} lockfile parse failed for cascade output "
+                f"(unexpected format from resolver)",
+            ))
+            continue
+        tagged = [_with_cascade_source(d, host) for d in deps]
+        out.append((pd, host, tagged, None))
+    return out
+
+
+def _common_ancestor(paths: Sequence[Path]) -> Path:
+    """Common-prefix path that every input is under. Used by the
+    cascade batch to size the sandbox cwd to cover all manifests in
+    one session. Single-input collapses to that input's parent (so
+    behaviour matches the sequential per-manifest path)."""
+    if len(paths) == 1:
+        return paths[0]
+    parts_lists = [p.resolve().parts for p in paths]
+    shortest = min(len(pl) for pl in parts_lists)
+    common: List[str] = []
+    for i in range(shortest):
+        seg = parts_lists[0][i]
+        if all(pl[i] == seg for pl in parts_lists):
+            common.append(seg)
+        else:
+            break
+    if not common:
+        return Path("/")
+    return Path(*common)
 
 
 # ---------------------------------------------------------------------------
