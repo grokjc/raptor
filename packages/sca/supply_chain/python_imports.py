@@ -51,9 +51,36 @@ from ..discovery import EXCLUDED_DIR_NAMES
 
 # Canonical skip set + this walker's extras. Drift-free: a new entry
 # in discovery.EXCLUDED_DIR_NAMES propagates to every walker.
-_EXCLUDED_DIRS: Set[str] = EXCLUDED_DIR_NAMES | {
-    "site-packages",        # any virtualenv that snuck in
+# Vendor / third-party tree names we DO want to scan.
+# ``python_import_time_execution`` is a supply-chain heuristic — it
+# only carries signal against code that COMES FROM a third-party
+# source. Operator-written code that runs ``os.cpu_count()`` /
+# ``os.environ.get()`` at import time is benign hygiene, not a
+# supply-chain risk; flagging it produces noise that drowns the
+# real signals from vendored deps.
+#
+# The detector therefore restricts its walk to paths whose ancestors
+# include one of these directory names. If a project doesn't vendor
+# any deps, the detector emits no findings (correct behaviour — there
+# is no third-party code to suspect). Projects that DO vendor (the
+# ``vendor/``, ``third_party/``, ``_vendor/`` patterns common in
+# Go-style monorepos and security-conscious Python projects) get
+# the heuristic against vendored content only.
+_VENDOR_DIR_NAMES: Set[str] = {
+    "vendor",
+    "_vendor",
+    "third_party",
+    "thirdparty",
+    "external",
 }
+
+# Walker exclusion set — same as discovery's, MINUS vendor-tree names
+# (we want to walk INTO those). ``site-packages`` is added because any
+# virtualenv that snuck in is the operator's local dev environment,
+# not a checked-in vendored dep.
+_EXCLUDED_DIRS: Set[str] = (
+    EXCLUDED_DIR_NAMES - _VENDOR_DIR_NAMES
+) | {"site-packages"}
 
 # Test-path detection shared with reachability + other supply_chain
 # detectors via packages.sca._test_paths — one source of truth.
@@ -314,6 +341,12 @@ def _is_simple_literal(node: ast.AST) -> bool:
 # ---------------------------------------------------------------------------
 
 def _walk_python_sources(target: Path, *, max_depth: int) -> Iterable[Path]:
+    """Yield ``.py`` paths under ``target`` that live inside a
+    recognised vendor-tree directory. Paths whose ancestors don't
+    include one of :data:`_VENDOR_DIR_NAMES` are skipped — operator-
+    written code is trusted; the supply-chain heuristic only fires
+    against third-party code we can actually attribute to an
+    external author."""
     base = len(target.parts)
     for dirpath, dirnames, filenames in os.walk(str(target), followlinks=False):
         cur = Path(dirpath)
@@ -322,6 +355,11 @@ def _walk_python_sources(target: Path, *, max_depth: int) -> Iterable[Path]:
             dirnames[:] = []
         else:
             dirnames[:] = [d for d in dirnames if d not in _EXCLUDED_DIRS]
+        # Only emit when the current directory or one of its
+        # ancestors is a recognised vendor tree. Cheap O(depth)
+        # check per dir; doesn't slow the walk noticeably.
+        if not any(part in _VENDOR_DIR_NAMES for part in cur.parts):
+            continue
         for fn in filenames:
             if fn.endswith(".py"):
                 yield cur / fn

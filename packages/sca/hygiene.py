@@ -223,15 +223,25 @@ def check_cross_manifest_inconsistency(
     territory.
     """
     out: List[HygieneFinding] = []
-    by_name: Dict[Tuple[str, str], List[Dependency]] = defaultdict(list)
+    # Bucket by (ecosystem, name, manifest_role, scope). Two deps in
+    # different roles or different scopes are EXPECTED to disagree:
+    # an `optional` extras manifest can pin a different version than
+    # the `main` one; `dev` deps need not match runtime deps. Without
+    # this partitioning, comparing requirements.txt against
+    # requirements-all-optional.txt floods the report with false
+    # positives that aren't actually inconsistencies — those manifests
+    # serve different purposes.
+    by_key: Dict[Tuple[str, str, str, str], List[Dependency]] = defaultdict(list)
     for d in deps:
         if d.is_lockfile:
             continue
         if d.version is None:
             continue
-        by_name[(d.ecosystem, d.name)].append(d)
+        role = _manifest_role(d.declared_in)
+        scope = d.scope or "main"
+        by_key[(d.ecosystem, d.name, role, scope)].append(d)
 
-    for (eco, name), rows in by_name.items():
+    for (eco, name, role, scope), rows in by_key.items():
         unique_versions = {r.version for r in rows if r.version}
         if len(unique_versions) <= 1:
             continue
@@ -241,15 +251,16 @@ def check_cross_manifest_inconsistency(
         workspaces = {r.declared_in.parent for r in rows}
         if len(workspaces) <= 1:
             continue
-        # One finding per ecosystem+name (not per row); attach the first
-        # manifest as the host so the finding ID is stable.
         host = rows[0]
+        # Mention role in detail when not "main" so operators can see
+        # at a glance why this group is being compared.
+        role_suffix = f" [{role} role]" if role != "main" else ""
         out.append(_finding(
             kind="cross_manifest_inconsistency",
             dep=host,
             detail=(
                 f"{eco}:{name} declared at versions {sorted(unique_versions)} "
-                f"across {len(workspaces)} workspaces"
+                f"across {len(workspaces)} workspaces{role_suffix}"
             ),
             severity="medium",
             confidence=Confidence(
@@ -258,6 +269,39 @@ def check_cross_manifest_inconsistency(
             ),
         ))
     return out
+
+
+def _manifest_role(path: Path) -> str:
+    """Classify a manifest by filename so cross-manifest comparison
+    only fires within the same role.
+
+    Returns one of: ``main``, ``dev``, ``test``, ``optional``.
+
+    Heuristics — filename-based, deliberate over-inclusion of "main":
+      * filename containing ``dev`` → ``dev`` (e.g. ``requirements-dev.txt``,
+        ``dev-requirements.txt``)
+      * filename containing ``test`` → ``test``
+      * ``requirements-*.txt`` (any other suffix) and filenames
+        containing ``optional`` / ``extras`` / ``all`` →
+        ``optional``
+      * everything else → ``main``
+
+    Pyproject.toml-sourced deps don't dispatch through this — their
+    ``scope`` field is already populated by the parser (``main`` for
+    ``[project.dependencies]``, ``optional`` for
+    ``[project.optional-dependencies.*]``, ``dev`` for
+    ``[tool.poetry.group.dev.dependencies]``). Both are partitioned
+    so cross-role + cross-scope divergence is allowed."""
+    name = path.name.lower()
+    if "dev" in name:
+        return "dev"
+    if "test" in name:
+        return "test"
+    if any(tok in name for tok in ("optional", "extras", "all-")):
+        return "optional"
+    if name.startswith("requirements-") and name.endswith(".txt"):
+        return "optional"
+    return "main"
 
 
 # ---------------------------------------------------------------------------

@@ -189,3 +189,58 @@ def test_cross_manifest_inconsistency_silenced_when_versions_match(
             _dep("lodash", version="1.0", path=b)]
     findings = evaluate([], deps)
     assert all(f.kind != "cross_manifest_inconsistency" for f in findings)
+
+
+def test_cross_manifest_main_vs_optional_does_not_fire(tmp_path: Path) -> None:
+    """``requirements.txt`` (main) and ``requirements-all-optional.txt``
+    (optional extras) ARE expected to declare different versions —
+    they serve different purposes. Without role-aware partitioning,
+    every multi-extras project would surface bogus
+    cross_manifest_inconsistency findings."""
+    main = tmp_path / "requirements.txt"
+    extras = tmp_path / ".devcontainer" / "requirements-all-optional.txt"
+    deps = [_dep("anthropic", version="0.40.0", path=main),
+            _dep("anthropic", version="0.100.0", path=extras)]
+    findings = evaluate([], deps)
+    assert all(f.kind != "cross_manifest_inconsistency" for f in findings), (
+        "main vs optional manifest divergence is normal, not a finding"
+    )
+
+
+def test_cross_manifest_main_vs_dev_does_not_fire(tmp_path: Path) -> None:
+    """``requirements.txt`` and ``requirements-dev.txt`` legitimately
+    pin different versions of overlapping deps (dev tools may want
+    a different pin than runtime). Different role → no comparison."""
+    main = tmp_path / "requirements.txt"
+    dev = tmp_path / "requirements-dev.txt"
+    deps = [_dep("pytest", version="8.0.0", path=main),
+            _dep("pytest", version="9.0.2", path=dev)]
+    findings = evaluate([], deps)
+    assert all(f.kind != "cross_manifest_inconsistency" for f in findings)
+
+
+def test_cross_manifest_within_main_role_still_fires(tmp_path: Path) -> None:
+    """Defends the inverse case — same-role mismatch IS a real
+    finding. Two ``requirements.txt`` files in different workspaces
+    declaring different versions is a workspace-divergence problem."""
+    a = tmp_path / "a" / "requirements.txt"
+    b = tmp_path / "b" / "requirements.txt"
+    deps = [_dep("requests", version="2.31.0", path=a),
+            _dep("requests", version="2.33.1", path=b)]
+    findings = evaluate([], deps)
+    assert any(f.kind == "cross_manifest_inconsistency" for f in findings)
+
+
+def test_manifest_role_helper_handles_common_filenames():
+    """Spot-check the filename classifier so future tweaks don't
+    silently shift the dev/test/optional taxonomy."""
+    from packages.sca.hygiene import _manifest_role
+    assert _manifest_role(Path("requirements.txt")) == "main"
+    assert _manifest_role(Path("pyproject.toml")) == "main"
+    assert _manifest_role(Path("requirements-dev.txt")) == "dev"
+    assert _manifest_role(Path("dev-requirements.txt")) == "dev"
+    assert _manifest_role(Path("requirements-test.txt")) == "test"
+    assert _manifest_role(Path("requirements-all-optional.txt")) == "optional"
+    assert _manifest_role(Path("requirements-extras.txt")) == "optional"
+    # Bare requirements-*.txt that's not main/dev/test → optional.
+    assert _manifest_role(Path("requirements-prod.txt")) == "optional"

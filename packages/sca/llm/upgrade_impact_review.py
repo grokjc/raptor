@@ -150,8 +150,18 @@ def assess_upgrade_impact(
     decision_class = f"sca:major_bump:{dep.ecosystem}"
     fast_model_name = _fast_tier_model_name(client)
     cheap = _cheap_safe_check(client, dep, new_version, changelog)
-    cheap_says_safe = cheap is not None and cheap.verdict == "clear_safe"
-    cheap_reasoning = cheap.reasoning if cheap is not None else ""
+    # Defensive: tests sometimes stub ``run_stage`` to return the same
+    # MagicMock for both the cheap and full calls, so ``cheap`` may
+    # not actually be an :class:`UpgradeImpactPrefilter`. ``getattr``
+    # with defaults keeps the wiring robust against that without
+    # forcing every test to know about the prefilter shape.
+    cheap_says_safe = (
+        cheap is not None
+        and getattr(cheap, "verdict", None) == "clear_safe"
+    )
+    cheap_reasoning = (
+        getattr(cheap, "reasoning", "") if cheap is not None else ""
+    )
 
     decision = prefilter_decision(
         getattr(client, "scorecard", None),

@@ -152,6 +152,27 @@ def test_version_publish_does_not_fire_when_old() -> None:
     assert all(f.kind != "version_publish" for f in out)
 
 
+def test_version_publish_non_dormant_active_package_does_not_fire() -> None:
+    """Active packages publish all the time — anthropic/openai/etc.
+    bump every few days. Without this guard, the report drowns in
+    Info-level ``version_publish`` entries for routine releases.
+    Only the previously-dormant case is the genuine signal
+    (account-takeover pattern: long-stable package gets a sudden
+    fresh publish)."""
+    pypi = _PyPIStub({
+        "info": {},
+        "releases": {
+            # 30 days between releases ≪ 365-day dormant threshold.
+            "1.0.0": [{"upload_time_iso_8601": _iso(30)}],
+            "1.0.1": [{"upload_time_iso_8601": _iso(2)}],
+        },
+    })
+    out = scan_deps([_dep()], pypi_client=pypi, now=_NOW)
+    assert all(f.kind != "version_publish" for f in out), (
+        "non-dormant active package should NOT fire version_publish"
+    )
+
+
 def test_version_publish_dormant_package_elevates_severity() -> None:
     """Dormant package (>365d gap) + recent publish -> medium severity."""
     pypi = _PyPIStub({
@@ -360,6 +381,40 @@ def test_low_bus_factor_pypi() -> None:
     out = scan_deps([_dep()], pypi_client=pypi, now=_NOW)
     bf = [f for f in out if f.kind == "low_bus_factor"]
     assert len(bf) == 1
+
+
+def test_low_bus_factor_pypi_comma_separated_authors_does_not_fire() -> None:
+    """PyPI ``author`` is a free-text field; multi-person projects use
+    a comma-separated list (``"Holger Krekel, Bruno Oliveira, …"``).
+    The parser must split that into individual entries — without the
+    split, a 7-author project registers as single-maintainer because
+    the count of distinct ``name`` strings is 1."""
+    pypi = _PyPIStub({
+        "info": {
+            "author": ("Holger Krekel, Bruno Oliveira, Ronny Pfannschmidt, "
+                       "Floris Bruynooghe, Brianna Laugher, Freya Bruhin, "
+                       "Others (See AUTHORS)"),
+        },
+        "releases": {"1.0": [{"upload_time_iso_8601": _iso(180)}]},
+    })
+    out = scan_deps([_dep()], pypi_client=pypi, now=_NOW)
+    assert all(f.kind != "low_bus_factor" for f in out), (
+        "comma-separated author list must NOT register as one maintainer"
+    )
+
+
+def test_low_bus_factor_pypi_two_authors_via_split_no_fire() -> None:
+    """The comma-split must register a 2-author entry as 2 maintainers,
+    not as 1."""
+    pypi = _PyPIStub({
+        "info": {
+            "author": "Alice Smith, Bob Jones",
+            "author_email": "[email protected], [email protected]",
+        },
+        "releases": {"1.0": [{"upload_time_iso_8601": _iso(180)}]},
+    })
+    out = scan_deps([_dep()], pypi_client=pypi, now=_NOW)
+    assert all(f.kind != "low_bus_factor" for f in out)
 
 
 def test_low_bus_factor_npm_multiple() -> None:

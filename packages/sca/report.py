@@ -153,6 +153,12 @@ def _render_summary(
     cache_hits: Optional[int],
     cache_misses: Optional[int],
 ) -> str:
+    # Aggregate severity across ALL finding types (vulns + supply-chain
+    # + hygiene). Without this, the headline severity table only
+    # counted vulns — the ~90 supply-chain + hygiene findings were
+    # invisible at-a-glance, so an operator with "0 critical, 4 medium"
+    # at the top might miss that there were also 31 supply-chain
+    # mediums plus 57 hygiene findings to triage.
     severity_counts: Counter[str] = Counter()
     kev_count = 0
     suppressed_count = 0
@@ -163,6 +169,16 @@ def _render_summary(
         severity_counts[f.severity] += 1
         if f.in_kev:
             kev_count += 1
+    for f in supply_chain_findings:
+        if getattr(f, "suppressed", False):
+            suppressed_count += 1
+            continue
+        severity_counts[f.severity] += 1
+    for f in hygiene_findings:
+        if getattr(f, "suppressed", False):
+            suppressed_count += 1
+            continue
+        severity_counts[f.severity] += 1
 
     rows = [
         "## Summary\n",

@@ -171,11 +171,23 @@ def _from_pypi(raw: dict) -> _Meta:
     maintainers: List[Dict[str, Any]] = []
     for field_name in ("maintainer", "author"):
         n = info.get(field_name)
-        if isinstance(n, str) and n.strip():
-            email_field = f"{field_name}_email"
+        if not (isinstance(n, str) and n.strip()):
+            continue
+        email_field = f"{field_name}_email"
+        emails_raw = (info.get(email_field) or "").strip()
+        # PyPI convention: ``author`` / ``maintainer`` is a free-text
+        # field that's comma-separated when there are multiple people.
+        # Same goes for the parallel ``*_email`` fields. Split both,
+        # zip into individual records — without this, a project with
+        # 7 listed authors registers as a single-maintainer
+        # low_bus_factor. (npm exposes maintainers as a structured
+        # array; this is a PyPI-only quirk.)
+        names = [s.strip() for s in n.split(",") if s.strip()]
+        email_list = [s.strip() for s in emails_raw.split(",") if s.strip()]
+        for i, person in enumerate(names):
             maintainers.append({
-                "name": n.strip(),
-                "email": (info.get(email_field) or "").strip() or None,
+                "name": person,
+                "email": email_list[i] if i < len(email_list) else None,
             })
     first_pub = version_timestamps[0] if version_timestamps else None
     latest_pub = version_timestamps[-1] if version_timestamps else None
@@ -311,10 +323,18 @@ def _version_publish_check(
     age_days = (now - meta.latest_publish).days
     if age_days >= threshold:
         return []
-    dormant = meta.is_dormant
-    sev = "medium" if dormant else "info"
+    # Routine publishes on actively-maintained packages are not a
+    # supply-chain signal — they're just normal release cadence
+    # (anthropic, openai, claude-code etc. publish daily). The
+    # interesting case is a fresh publish on a previously-dormant
+    # package, which is the classic account-takeover pattern.
+    # Without this filter the report drowns in Info-level entries
+    # for every actively-maintained dep.
+    if not meta.is_dormant:
+        return []
+    sev = "medium"                          # only fires when dormant now
     dormant_detail = ""
-    if dormant and meta.second_latest_publish is not None:
+    if meta.second_latest_publish is not None:
         gap = (meta.latest_publish - meta.second_latest_publish).days
         dormant_detail = (
             f" (package was dormant for {gap} days before this release)"
@@ -326,7 +346,7 @@ def _version_publish_check(
     evidence: Dict[str, Any] = {
         "latest_publish": meta.latest_publish.isoformat(),
         "version_age_days": age_days,
-        "dormant": dormant,
+        "dormant": True,                    # only dormant fires now
     }
     if meta.second_latest_publish is not None:
         evidence["second_latest_publish"] = (
