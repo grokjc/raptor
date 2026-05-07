@@ -697,11 +697,70 @@ def _walk_gitlab_image_refs(data: dict):
         yield from _from(v, f"job {k}")
 
 
+def find_kubernetes_image_refs(target: Path) -> List[ImageRefSource]:
+    """Walk the target for Kubernetes manifest YAMLs, extract the
+    container images declared by each workload kind."""
+    out: List[ImageRefSource] = []
+    try:
+        import yaml
+    except ImportError:
+        return out
+    from .parsers.kubernetes import _is_k8s_manifest, _WORKLOAD_KINDS
+    from .discovery import EXCLUDED_DIR_NAMES
+    for root, dirs, files in os.walk(target):
+        dirs[:] = [
+            d for d in dirs
+            if d not in EXCLUDED_DIR_NAMES and not d.startswith(".")
+        ]
+        for f in files:
+            p = Path(root) / f
+            if not _is_k8s_manifest(p):
+                continue
+            try:
+                text = p.read_text(encoding="utf-8", errors="replace")
+                docs = list(yaml.safe_load_all(text))
+            except (OSError, yaml.YAMLError):
+                continue
+            for doc in docs:
+                if not isinstance(doc, dict):
+                    continue
+                kind = doc.get("kind")
+                if not isinstance(kind, str) or kind not in _WORKLOAD_KINDS:
+                    continue
+                spec = doc.get("spec")
+                if not isinstance(spec, dict):
+                    continue
+                template_spec = spec
+                template = spec.get("template")
+                if isinstance(template, dict):
+                    ts = template.get("spec")
+                    if isinstance(ts, dict):
+                        template_spec = ts
+                for cf in (
+                    "containers", "initContainers", "ephemeralContainers",
+                ):
+                    containers = template_spec.get(cf)
+                    if not isinstance(containers, list):
+                        continue
+                    for container in containers:
+                        if not isinstance(container, dict):
+                            continue
+                        image = container.get("image")
+                        if isinstance(image, str) and image.strip():
+                            out.append(ImageRefSource(
+                                image=image.strip(),
+                                declared_in=p,
+                                source_kind="k8s",
+                            ))
+    return out
+
+
 def find_all_image_refs(target: Path) -> List[ImageRefSource]:
     """Discover every image reference in the target tree across
     Dockerfile FROM, docker-compose ``image:``, GitLab CI ``image:``
-    + ``services:``. Output is the flat list — caller dedupes by
-    ``image`` if the SBOM-fetch tier wants only-once semantics."""
+    + ``services:``, and Kubernetes ``spec.containers[].image``.
+    Output is the flat list — caller dedupes by ``image`` if the
+    SBOM-fetch tier wants only-once semantics."""
     out: List[ImageRefSource] = []
     for dockerfile in find_dockerfiles(target):
         try:
@@ -717,6 +776,7 @@ def find_all_image_refs(target: Path) -> List[ImageRefSource]:
             ))
     out.extend(find_compose_image_refs(target))
     out.extend(find_gitlab_ci_image_refs(target))
+    out.extend(find_kubernetes_image_refs(target))
     return out
 
 
@@ -859,6 +919,7 @@ __all__ = [
     "find_compose_image_refs",
     "find_dockerfiles",
     "find_gitlab_ci_image_refs",
+    "find_kubernetes_image_refs",
     "image_source_registry_hosts",
     "packages_to_dependencies",
     "scan_dockerfiles",

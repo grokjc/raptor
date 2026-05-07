@@ -354,6 +354,12 @@ def _classify(path: Path) -> Optional[str]:
     # by predicate.
     if _is_compose_file(name):
         return "OCI"
+    # Kubernetes manifests — content-sniffed by the parser
+    # (top-level ``kind:`` must match a workload). Discovery
+    # speculatively routes any otherwise-unclassified YAML through
+    # the parser; the parser returns [] for non-workload YAMLs.
+    if path.suffix.lower() in (".yml", ".yaml"):
+        return "Kubernetes"
     return None
 
 
