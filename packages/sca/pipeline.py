@@ -441,6 +441,27 @@ def run_sca(
         reachability=reachability_map,
     )
 
+    # 7a-bis. Annotate each finding with exploit-existence
+    # signals from the calibration corpus (KEV + Exploit-DB
+    # entry IDs + Metasploit module paths). Augments the binary
+    # ``in_kev`` flag with concrete references operators can
+    # follow up on. Best-effort: a missing corpus dir leaves
+    # findings with empty ``ExploitEvidence``.
+    try:
+        from .exploit_evidence import annotate_findings as _annotate
+        evidence_count = _annotate(vuln_findings)
+        if evidence_count:
+            logger.info(
+                "sca.pipeline: exploit-evidence corpus matched %d "
+                "finding(s)", evidence_count,
+            )
+    except Exception:                                  # noqa: BLE001
+        logger.warning(
+            "sca.pipeline: exploit-evidence annotation failed; "
+            "findings won't carry EDB / MSF references",
+            exc_info=True,
+        )
+
     # 7a. Apply operator suppression overlay (`.raptor-sca-suppress.yml`).
     suppressed_total = 0
     if options.enable_suppressions:

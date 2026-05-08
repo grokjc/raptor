@@ -406,6 +406,27 @@ def _render_one_vuln(f: VulnFinding, *, omit_source: bool = False) -> str:
     if badges:
         bullets.append(f"- {' / '.join(badges)}")
 
+    # Exploit-existence references — KEV badge tells operators the
+    # CVE is "exploited"; these lines tell them WHERE the exploit
+    # lives so triage can be concrete (e.g. "look up MSF
+    # exploits/multi/http/log4shell to see what attackers actually
+    # do with this").
+    ev = getattr(f, "exploit_evidence", None)
+    if ev is not None and ev.has_any:
+        if ev.edb_ids:
+            edb_count = len(ev.edb_ids)
+            shown = ", ".join(str(i) for i in ev.edb_ids[:3])
+            extra = f" (+{edb_count - 3} more)" if edb_count > 3 else ""
+            bullets.append(
+                f"- Exploit-DB: **{shown}**{extra} "
+                f"(<https://www.exploit-db.com/exploits/{ev.edb_ids[0]}>)"
+            )
+        if ev.msf_modules:
+            msf_count = len(ev.msf_modules)
+            shown = ", ".join(f"`{m}`" for m in ev.msf_modules[:2])
+            extra = f" (+{msf_count - 2} more)" if msf_count > 2 else ""
+            bullets.append(f"- Metasploit: {shown}{extra}")
+
     if not omit_source:
         if dep.is_lockfile:
             bullets.append(f"- Source: lockfile (`{dep.declared_in}`)")

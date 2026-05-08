@@ -220,9 +220,35 @@ class VulnFinding:
     # score what it is" without re-deriving it.
     raptor_risk_estimate: Optional[float] = None
     risk_components: Optional[Dict[str, Any]] = None
+    # Exploit-existence evidence from the calibration corpus.
+    # Augments ``in_kev`` with concrete references operators can
+    # follow up on (Exploit-DB entry IDs, Metasploit module paths).
+    # None when the corpus hasn't been loaded; an empty
+    # ExploitEvidence (all-fields-empty) when loaded but no
+    # signals matched any of this finding's CVE aliases.
+    exploit_evidence: Optional["ExploitEvidence"] = None
     related_findings: List[str] = field(default_factory=list)
     suppressed: bool = False
     suppression_reason: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class ExploitEvidence:
+    """Per-CVE exploit-existence signals derived from the
+    calibration corpus.
+
+    All three sources are independent: a CVE can be in KEV without
+    a public PoC, or have a public PoC without a Metasploit module,
+    etc. Operators triaging vulns benefit from seeing all three.
+    """
+    kev_listed: bool = False
+    edb_ids: List[int] = field(default_factory=list)
+    msf_modules: List[str] = field(default_factory=list)
+
+    @property
+    def has_any(self) -> bool:
+        """True iff at least one signal fired."""
+        return self.kev_listed or bool(self.edb_ids) or bool(self.msf_modules)
 
 
 HygieneKind = Literal[

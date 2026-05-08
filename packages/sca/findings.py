@@ -401,8 +401,24 @@ def _vuln_finding_to_row(f: VulnFinding) -> Dict[str, Any]:
             "transitive_depth": f.transitive_depth,
             "raptor_risk_estimate": f.raptor_risk_estimate,
             "risk_components": f.risk_components,
+            "exploit_evidence": _exploit_evidence_summary(f.exploit_evidence),
             "related_findings": list(f.related_findings),
         },
+    }
+
+
+def _exploit_evidence_summary(ev) -> Optional[Dict[str, Any]]:
+    """Render :class:`ExploitEvidence` as the ``sca.exploit_evidence``
+    block in findings.json. Emits None when annotation didn't run
+    (e.g. corpus missing) so the field is absent rather than
+    misleadingly-empty."""
+    if ev is None:
+        return None
+    return {
+        "kev_listed": ev.kev_listed,
+        "edb_ids": list(ev.edb_ids),
+        "msf_modules": list(ev.msf_modules),
+        "has_any": ev.has_any,
     }
 
 
