@@ -78,6 +78,7 @@ def render_markdown_report(
     vuln_findings: Sequence[VulnFinding],
     hygiene_findings: Sequence[HygieneFinding],
     supply_chain_findings: Sequence[SupplyChainFinding] = (),
+    license_findings: Sequence = (),
     cache_hits: Optional[int] = None,
     cache_misses: Optional[int] = None,
     generated_at: Optional[datetime] = None,
@@ -99,6 +100,10 @@ def render_markdown_report(
         supply_chain_findings,
         key=lambda f: (-severity_rank(f.severity), f.kind, f.dependency.name),
     )
+    sorted_license = sorted(
+        license_findings,
+        key=lambda f: (-severity_rank(f.severity), f.kind, f.dependency.name),
+    )
 
     parts: List[str] = []
     parts.append(_render_header(target, generated_at))
@@ -107,6 +112,7 @@ def render_markdown_report(
         vuln_findings=sorted_vulns,
         hygiene_findings=sorted_hygiene,
         supply_chain_findings=sorted_supply_chain,
+        license_findings=sorted_license,
         cache_hits=cache_hits,
         cache_misses=cache_misses,
     ))
@@ -114,13 +120,41 @@ def render_markdown_report(
         parts.append(_render_vuln_section(sorted_vulns))
     if sorted_supply_chain:
         parts.append(_render_supply_chain_section(sorted_supply_chain))
+    if sorted_license:
+        parts.append(_render_license_section(sorted_license))
     if sorted_hygiene:
         parts.append(_render_hygiene_section(sorted_hygiene))
-    if not sorted_vulns and not sorted_hygiene and not sorted_supply_chain:
-        parts.append("## Findings\n\nNo vulnerabilities, hygiene, or "
-                     "supply-chain issues detected for the analysed "
-                     "dependency set.\n")
+    if (not sorted_vulns and not sorted_hygiene
+            and not sorted_supply_chain and not sorted_license):
+        parts.append("## Findings\n\nNo vulnerabilities, hygiene, "
+                     "supply-chain or license issues detected for "
+                     "the analysed dependency set.\n")
     return "\n".join(parts).rstrip() + "\n"
+
+
+def _render_license_section(findings) -> str:
+    """Render the license-policy findings as a deny / warn / unknown
+    table — operators triage by kind, then by severity."""
+    lines = ["## License findings\n"]
+    for f in findings:
+        dep = f.dependency
+        spdx = f.spdx or "(none)"
+        kind_label = {
+            "license_denied": "Denied",
+            "license_warned": "Warned",
+            "license_unknown": "Unknown",
+            "license_incompatible": "Incompatible",
+        }.get(f.kind, f.kind)
+        lines.append(
+            f"### {kind_label} — {dep.ecosystem}:{dep.name}"
+            f"@{dep.version or '*'}"
+        )
+        lines.append(f"- License: `{spdx}`")
+        lines.append(f"- Severity: **{f.severity}**")
+        lines.append(f"- Detail: {f.detail}")
+        lines.append(f"- Source: `{dep.declared_in}`")
+        lines.append("")
+    return "\n".join(lines)
 
 
 def write_markdown_report(path: Path, content: str) -> None:
@@ -150,6 +184,7 @@ def _render_summary(
     vuln_findings: Sequence[VulnFinding],
     hygiene_findings: Sequence[HygieneFinding],
     supply_chain_findings: Sequence[SupplyChainFinding],
+    license_findings: Sequence = (),
     cache_hits: Optional[int],
     cache_misses: Optional[int],
 ) -> str:
@@ -179,6 +214,11 @@ def _render_summary(
             suppressed_count += 1
             continue
         severity_counts[f.severity] += 1
+    for f in license_findings:
+        if getattr(f, "suppressed", False):
+            suppressed_count += 1
+            continue
+        severity_counts[f.severity] += 1
 
     rows = [
         "## Summary\n",
@@ -197,6 +237,8 @@ def _render_summary(
     rows.append(f"- KEV-listed: **{kev_count}**")
     rows.append(f"- Supply-chain findings: **{len(supply_chain_findings)}**")
     rows.append(f"- Hygiene findings: **{len(hygiene_findings)}**")
+    if license_findings:
+        rows.append(f"- License findings: **{len(license_findings)}**")
     if suppressed_count:
         rows.append(f"- Suppressed: **{suppressed_count}** (operator-marked, "
                     "see `.raptor-sca-suppress.yml`)")

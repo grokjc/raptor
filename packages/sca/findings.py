@@ -332,12 +332,13 @@ def write_findings_json(
     vuln_findings: Iterable[VulnFinding] = (),
     hygiene_findings: Iterable[HygieneFinding] = (),
     supply_chain_findings: Iterable[SupplyChainFinding] = (),
+    license_findings: Iterable[Any] = (),
 ) -> int:
     """Write the merged finding list to ``path`` and return its row count.
 
     Output shape: a top-level list of dicts, each tagged with one of
     ``sca:vulnerable_dependency`` / ``sca:hygiene:<kind>`` /
-    ``sca:supply_chain:<kind>``.
+    ``sca:supply_chain:<kind>`` / ``sca:license:<kind>``.
     """
     rows: List[Dict[str, Any]] = []
     for f in vuln_findings:
@@ -346,6 +347,8 @@ def write_findings_json(
         rows.append(_hygiene_finding_to_row(f))
     for f in supply_chain_findings:
         rows.append(_supply_chain_finding_to_row(f))
+    for f in license_findings:
+        rows.append(_license_finding_to_row(f))
 
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -449,6 +452,31 @@ def _supply_chain_finding_to_row(f: SupplyChainFinding) -> Dict[str, Any]:
             "name": f.dependency.name,
             "version": f.dependency.version,
             "evidence": dict(f.evidence),
+            "confidence": _confidence_summary(f.confidence),
+        },
+    }
+
+
+def _license_finding_to_row(f: Any) -> Dict[str, Any]:
+    return {
+        "id": f.finding_id,
+        "finding_id": f.finding_id,
+        "vuln_type": f"sca:license:{f.kind.replace('license_', '')}",
+        "tool": "sca",
+        "file": str(f.dependency.declared_in),
+        "function": f.dependency.name,
+        "line": 0,
+        "severity": f.severity,
+        "suppressed": f.suppressed,
+        "suppression_reason": f.suppression_reason,
+        "description": f.detail,
+        "sca": {
+            "kind": f.kind,
+            "ecosystem": f.dependency.ecosystem,
+            "name": f.dependency.name,
+            "version": f.dependency.version,
+            "spdx": f.spdx,
+            "purl": f.dependency.purl,
             "confidence": _confidence_summary(f.confidence),
         },
     }

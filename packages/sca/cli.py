@@ -505,6 +505,10 @@ def _print_summary(result) -> None:
         f"raptor-sca: supply-chain      {result.supply_chain_findings}",
         f"raptor-sca: hygiene findings  {result.hygiene_findings}",
     ])
+    if result.license_findings:
+        lines.append(
+            f"raptor-sca: license findings  {result.license_findings}"
+        )
     if result.llm_reviews_run or result.llm_reviews_failed:
         lines.append(
             f"raptor-sca: LLM reviews       {result.llm_reviews_run} enriched"

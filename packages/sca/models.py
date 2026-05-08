@@ -253,6 +253,34 @@ class HygieneFinding:
     suppression_reason: Optional[str] = None
 
 
+LicenseKind = Literal[
+    "license_denied",       # dep's SPDX matches policy.deny
+    "license_warned",       # dep's SPDX matches policy.warn
+    "license_unknown",      # registry didn't return a license, can't enforce
+    "license_incompatible", # multi-license expr with no acceptable choice
+]
+
+
+@dataclass
+class LicenseFinding:
+    """Per-dep license-policy finding — the legal/compliance dimension.
+
+    Distinct from HygieneFinding (security integrity) and
+    SupplyChainFinding (registry-level supply-chain attacks); a
+    deny-listed license isn't a security issue, it's a compliance
+    issue, and operators triage these on a different axis.
+    """
+    finding_id: str
+    kind: LicenseKind
+    dependency: Dependency
+    spdx: Optional[str]              # the license string we evaluated; None on unknown
+    detail: str
+    severity: Severity
+    confidence: Confidence
+    suppressed: bool = False
+    suppression_reason: Optional[str] = None
+
+
 SupplyChainKind = Literal[
     "typosquat_candidate",
     "typosquat_domain",

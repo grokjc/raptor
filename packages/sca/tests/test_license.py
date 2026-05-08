@@ -1,0 +1,303 @@
+"""Tests for the license-policy module."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Optional
+
+import pytest
+
+from packages.sca.license import (
+    DEFAULT_POLICY,
+    LicensePolicy,
+    _spdx_from_npm,
+    _spdx_from_pypi,
+    enrich_licenses,
+    evaluate,
+    load_policy,
+)
+from packages.sca.models import Confidence, Dependency, PinStyle
+
+
+def _dep(
+    name: str = "foo",
+    version: str = "1.0.0",
+    ecosystem: str = "PyPI",
+    license: Optional[str] = None,
+) -> Dependency:
+    return Dependency(
+        ecosystem=ecosystem,
+        name=name,
+        version=version,
+        declared_in=Path("/repo/manifest"),
+        scope="main",
+        is_lockfile=False,
+        pin_style=PinStyle.EXACT,
+        direct=True,
+        purl=f"pkg:{ecosystem.lower()}/{name}@{version}",
+        parser_confidence=Confidence("high", reason="t"),
+        declared_license=license,
+    )
+
+
+# ---------------------------------------------------------------------------
+# evaluate — classification
+# ---------------------------------------------------------------------------
+
+
+def test_allowed_license_emits_no_finding():
+    deps = [_dep(license="MIT")]
+    policy = LicensePolicy(allow={"MIT"}, default="deny")
+    findings = evaluate(deps, policy)
+    assert findings == []
+
+
+def test_denied_license_emits_high_severity():
+    deps = [_dep(license="AGPL-3.0")]
+    findings = evaluate(deps, DEFAULT_POLICY)
+    assert len(findings) == 1
+    assert findings[0].kind == "license_denied"
+    assert findings[0].severity == "high"
+    assert findings[0].spdx == "AGPL-3.0"
+
+
+def test_warned_license_emits_medium_severity():
+    deps = [_dep(license="GPL-3.0")]
+    findings = evaluate(deps, DEFAULT_POLICY)
+    assert len(findings) == 1
+    assert findings[0].kind == "license_warned"
+    assert findings[0].severity == "medium"
+
+
+def test_unknown_license_with_warn_policy_emits_info():
+    deps = [_dep(license=None)]
+    findings = evaluate(deps, DEFAULT_POLICY)  # on_unknown="warn"
+    assert len(findings) == 1
+    assert findings[0].kind == "license_unknown"
+    assert findings[0].severity == "info"
+    assert findings[0].spdx is None
+
+
+def test_unknown_license_with_deny_policy_emits_high():
+    policy = LicensePolicy(on_unknown="deny")
+    findings = evaluate([_dep(license=None)], policy)
+    assert findings[0].severity == "high"
+
+
+def test_unknown_license_with_allow_policy_no_finding():
+    policy = LicensePolicy(on_unknown="allow")
+    findings = evaluate([_dep(license=None)], policy)
+    assert findings == []
+
+
+def test_default_action_deny_for_unmatched_license():
+    """When ``default=deny``, a license not in any list (and not
+    AGPL/etc.) gets denied. Strict policy."""
+    policy = LicensePolicy(default="deny")
+    findings = evaluate([_dep(license="WTFPL")], policy)
+    assert findings[0].kind == "license_denied"
+
+
+def test_default_action_warn_for_unmatched_license():
+    policy = LicensePolicy(default="warn")
+    findings = evaluate([_dep(license="WTFPL")], policy)
+    assert findings[0].kind == "license_warned"
+
+
+def test_default_action_allow_silent():
+    policy = LicensePolicy(default="allow")
+    findings = evaluate([_dep(license="WTFPL")], policy)
+    assert findings == []
+
+
+def test_dedup_same_dep_across_manifests():
+    """Same dep declared in two manifests doesn't emit two findings."""
+    d1 = _dep(name="bad", license="AGPL-3.0")
+    d2 = _dep(name="bad", license="AGPL-3.0")
+    findings = evaluate([d1, d2], DEFAULT_POLICY)
+    assert len(findings) == 1
+
+
+# ---------------------------------------------------------------------------
+# evaluate — multi-license expressions
+# ---------------------------------------------------------------------------
+
+
+def test_or_expression_satisfied_by_any_allowed_choice():
+    """``MIT OR Apache-2.0`` — operator only needs ONE choice in
+    policy.allow. Common dual-license shape in OSS."""
+    policy = LicensePolicy(allow={"MIT"}, deny={"AGPL-3.0"})
+    findings = evaluate(
+        [_dep(license="MIT OR Apache-2.0")], policy,
+    )
+    assert findings == []
+
+
+def test_or_expression_all_denied_emits_denied():
+    policy = LicensePolicy(deny={"AGPL-3.0", "SSPL-1.0"})
+    findings = evaluate(
+        [_dep(license="AGPL-3.0 OR SSPL-1.0")], policy,
+    )
+    assert findings[0].kind == "license_denied"
+
+
+def test_or_expression_no_choice_in_allow_emits_incompatible():
+    """OR expression where no choice is explicitly allow-listed —
+    operator must pick. Emits incompatible (medium severity)."""
+    policy = LicensePolicy(allow={"BSD-3-Clause"}, deny={"GPL-3.0"})
+    findings = evaluate(
+        [_dep(license="MIT OR Apache-2.0")], policy,
+    )
+    assert findings[0].kind == "license_incompatible"
+
+
+def test_and_expression_first_violation_terminates():
+    """AND expression: the first denied/warned term emits the
+    finding. ``GPL-3.0 AND BSD-3-Clause`` against deny={GPL-3.0}
+    surfaces the denial."""
+    policy = LicensePolicy(deny={"GPL-3.0"}, allow={"BSD-3-Clause"})
+    findings = evaluate(
+        [_dep(license="GPL-3.0 AND BSD-3-Clause")], policy,
+    )
+    assert findings[0].kind == "license_denied"
+
+
+# ---------------------------------------------------------------------------
+# load_policy
+# ---------------------------------------------------------------------------
+
+
+def test_load_policy_no_file_returns_default(tmp_path):
+    target = tmp_path / "repo"
+    target.mkdir()
+    policy = load_policy(target)
+    assert policy is DEFAULT_POLICY
+
+
+def test_load_policy_from_yaml(tmp_path):
+    pytest.importorskip("yaml")
+    target = tmp_path / "repo"
+    target.mkdir()
+    (target / ".raptor-sca-license-policy.yml").write_text(
+        "allow:\n  - MIT\n  - Apache-2.0\n"
+        "deny:\n  - AGPL-3.0\n"
+        "warn:\n  - GPL-3.0\n"
+        "default: warn\n"
+        "on_unknown: deny\n"
+    )
+    policy = load_policy(target)
+    assert policy.allow == {"MIT", "Apache-2.0"}
+    assert policy.deny == {"AGPL-3.0"}
+    assert policy.warn == {"GPL-3.0"}
+    assert policy.default == "warn"
+    assert policy.on_unknown == "deny"
+
+
+def test_load_policy_malformed_yaml_falls_back(tmp_path):
+    pytest.importorskip("yaml")
+    target = tmp_path / "repo"
+    target.mkdir()
+    (target / ".raptor-sca-license-policy.yml").write_text("not: valid: yaml: [")
+    policy = load_policy(target)
+    assert policy is DEFAULT_POLICY
+
+
+def test_load_policy_invalid_action_falls_back_to_default(tmp_path):
+    pytest.importorskip("yaml")
+    target = tmp_path / "repo"
+    target.mkdir()
+    (target / ".raptor-sca-license-policy.yml").write_text(
+        "default: nonsense\non_unknown: also-bad\n"
+    )
+    policy = load_policy(target)
+    # Action invalid -> default fallback ("allow"/"warn").
+    assert policy.default == "allow"
+    assert policy.on_unknown == "warn"
+
+
+# ---------------------------------------------------------------------------
+# enrich_licenses — registry-metadata extraction
+# ---------------------------------------------------------------------------
+
+
+def test_spdx_from_pypi_explicit_field():
+    meta = {"info": {"license": "MIT"}}
+    assert _spdx_from_pypi(meta) == "MIT"
+
+
+def test_spdx_from_pypi_pep639_expression_wins():
+    meta = {
+        "info": {
+            "license_expression": "Apache-2.0",
+            "license": "free-text fallback",
+        },
+    }
+    assert _spdx_from_pypi(meta) == "Apache-2.0"
+
+
+def test_spdx_from_pypi_freetext_skipped():
+    """Long free-text descriptions like 'see LICENSE file' aren't
+    SPDX ids and shouldn't be returned."""
+    meta = {"info": {"license": "see the LICENSE file in the source tree"}}
+    assert _spdx_from_pypi(meta) is None
+
+
+def test_spdx_from_pypi_trove_classifier_fallback():
+    meta = {
+        "info": {
+            "license": "",
+            "classifiers": [
+                "Operating System :: POSIX",
+                "License :: OSI Approved :: MIT License",
+                "Programming Language :: Python :: 3",
+            ],
+        },
+    }
+    assert _spdx_from_pypi(meta) == "MIT"
+
+
+def test_spdx_from_npm_top_level_string():
+    meta = {"license": "ISC"}
+    assert _spdx_from_npm(meta, version=None) == "ISC"
+
+
+def test_spdx_from_npm_legacy_object_form():
+    meta = {"license": {"type": "MIT", "url": "https://..."}}
+    assert _spdx_from_npm(meta, version=None) == "MIT"
+
+
+def test_spdx_from_npm_per_version_wins():
+    meta = {
+        "license": "MIT",
+        "versions": {
+            "1.0.0": {"license": "Apache-2.0"},
+        },
+    }
+    # Per-version override beats top-level default.
+    assert _spdx_from_npm(meta, version="1.0.0") == "Apache-2.0"
+
+
+def test_spdx_from_npm_legacy_list_form():
+    """Very old npm packages used ``licenses: [{type: ...}]``."""
+    meta = {"licenses": [{"type": "MIT", "url": "..."}]}
+    assert _spdx_from_npm(meta, version=None) == "MIT"
+
+
+def test_enrich_licenses_no_http_skips():
+    deps = [_dep(license=None)]
+    enriched = enrich_licenses(deps, http=None)
+    assert enriched == 0
+    assert deps[0].declared_license is None
+
+
+def test_enrich_licenses_skips_already_populated(monkeypatch):
+    """A dep that already has declared_license isn't re-fetched."""
+    deps = [_dep(license="MIT")]
+
+    class _StubHttp:
+        def get_json(self, *a, **kw):
+            raise AssertionError("should not be called")
+
+    enriched = enrich_licenses(deps, http=_StubHttp())
+    assert enriched == 0
+    assert deps[0].declared_license == "MIT"

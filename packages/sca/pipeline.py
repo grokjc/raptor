@@ -75,6 +75,10 @@ class RunOptions:
     cache_root: Optional[Path] = None
     enable_kev: bool = True
     enable_epss: bool = True
+    enable_license_policy: bool = True   # license enrichment + policy
+                                          # eval. Disabled implicitly when
+                                          # ``offline`` is set; explicit
+                                          # disable via this flag.
     enable_reachability: bool = True
     enable_supply_chain: bool = True
     enable_suppressions: bool = True
@@ -165,6 +169,7 @@ class RunResult:
     llm_reviews_failed: int = 0
     triage_run: bool = False
     llm_cost: float = 0.0
+    license_findings: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -325,6 +330,47 @@ def run_sca(
             cache=cache,
         )
 
+    # 2b. License-policy: enrich (network-dependent) + evaluate
+    #     (mechanical). Enrichment fetches from PyPI / npm registry
+    #     metadata; evaluation classifies against operator policy
+    #     (or DEFAULT_POLICY when no .raptor-sca-license-policy.yml
+    #     ships in the target).
+    #
+    #     Enrichment respects ``--offline`` (no network). Evaluation
+    #     always runs — it operates on whatever declared_license
+    #     values exist (manifest-supplied + cache-backed).
+    license_findings: List = []
+    if options.enable_license_policy:
+        from .license import (
+            DEFAULT_POLICY, enrich_licenses, evaluate as evaluate_license,
+            load_policy,
+        )
+        try:
+            policy = load_policy(target)
+        except Exception:                              # noqa: BLE001
+            logger.warning(
+                "sca.pipeline: license policy load failed, using default",
+                exc_info=True,
+            )
+            policy = DEFAULT_POLICY
+        # Enrichment fetches from PyPI / npm registries. Skipped
+        # offline (cache may still populate via prior runs).
+        if not options.offline:
+            try:
+                enriched = enrich_licenses(joined, http=http, cache=cache)
+                if enriched:
+                    logger.info(
+                        "sca.pipeline: license enrichment populated %d dep(s)",
+                        enriched,
+                    )
+            except Exception:                              # noqa: BLE001
+                logger.warning(
+                    "sca.pipeline: license enrichment failed; "
+                    "evaluation will rely on existing declared_license",
+                    exc_info=True,
+                )
+        license_findings = evaluate_license(joined, policy)
+
     # 3. Canonical dep set: lockfile-preferred, deduped per (eco, name, ver).
     canonical = select_canonical_for_osv(joined)
 
@@ -457,6 +503,7 @@ def run_sca(
         vuln_findings=vuln_findings,
         hygiene_findings=hygiene_findings,
         supply_chain_findings=supply_chain_findings,
+        license_findings=license_findings,
     )
     md = render_markdown_report(
         target=target,
@@ -464,6 +511,7 @@ def run_sca(
         vuln_findings=vuln_findings,
         hygiene_findings=hygiene_findings,
         supply_chain_findings=supply_chain_findings,
+        license_findings=license_findings,
         cache_hits=cache.hits,
         cache_misses=cache.misses,
     )
@@ -504,6 +552,7 @@ def run_sca(
         vuln_findings=len(vuln_findings),
         hygiene_findings=len(hygiene_findings),
         supply_chain_findings=len(supply_chain_findings),
+        license_findings=len(license_findings),
         suppressed_findings=suppressed_total,
         transitive_statuses=transitive_statuses,
         transitive_added=sum(s.deps_added for s in transitive_statuses),
