@@ -203,6 +203,49 @@ PROJECT_SAMPLES: List[ProjectSample] = [
         repo_url="https://github.com/saleor/saleor.git",
         git_ref="2.10.0", license_spdx="BSD-3-Clause",
     ),
+    # ---- Round-3 corpus expansion: more app-shaped samples -----------
+    # Round-2 (saleor) cleared the OSV multi-manifest poison bug and
+    # got PyPI density off zero, but per-ecosystem signal is still
+    # heavily skewed: Maven 7%, npm 2%, Go 4%, RubyGems 2%, PyPI 1%.
+    # Per-ecosystem refit needs ~10+ signaled findings per ecosystem
+    # to be statistically viable; round-3 picks 5 app-shaped repos
+    # across the under-served ecosystems whose dep trees historically
+    # accrued exploit signals (KEV / EDB / MSF / PoC).
+    # sentry-9.x switched to BSL (source-available, not permissive);
+    # the corpus license check requires OSI-permissive licences for
+    # every sample. sentry 8.22 was the last Apache-2.0 release
+    # (Oct 2019, before the BSL switch in 2019-11). Same dep-tree
+    # shape, permissive license.
+    ProjectSample(
+        name="sentry-8.22", ecosystem="PyPI",
+        repo_url="https://github.com/getsentry/sentry.git",
+        git_ref="8.22.0", license_spdx="Apache-2.0",
+    ),
+    ProjectSample(
+        name="wagtail-2.10", ecosystem="PyPI",
+        repo_url="https://github.com/wagtail/wagtail.git",
+        git_ref="v2.10", license_spdx="BSD-3-Clause",
+    ),
+    ProjectSample(
+        name="superset-0.36", ecosystem="PyPI",
+        repo_url="https://github.com/apache/superset.git",
+        git_ref="0.36.0", license_spdx="Apache-2.0",
+    ),
+    ProjectSample(
+        name="strapi-3", ecosystem="npm",
+        repo_url="https://github.com/strapi/strapi.git",
+        git_ref="v3.6.0", license_spdx="MIT",
+    ),
+    ProjectSample(
+        name="helm-3.5", ecosystem="Go",
+        repo_url="https://github.com/helm/helm.git",
+        git_ref="v3.5.0", license_spdx="Apache-2.0",
+    ),
+    # NB: no RubyGems app added in round-3 — Discourse is GPL-2,
+    # Mastodon is AGPL, Redmine is GPL-2; no popular permissive-
+    # licensed Ruby app to point at. RubyGems density (1.7%) stays
+    # served by the rails-{4.2,5.2,7.1} library siblings until a
+    # permissive Ruby app surfaces.
 ]
 
 
