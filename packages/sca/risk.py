@@ -60,7 +60,7 @@ _KEV_MULTIPLIER = 1.20
 # multiplier is smaller for the same reason — EDB/MSF/PoC are weaker
 # signals than active CISA-tracked exploitation.
 _EXPLOIT_EVIDENCE_FLOOR = 60.0
-_EXPLOIT_EVIDENCE_MULTIPLIER = 1.10
+_EXPLOIT_EVIDENCE_MULTIPLIER = 1.21
 
 # EPSS — exploit probability in the wild. Even a 0% EPSS leaves 30%
 # weight (a vuln with no observed exploitation isn't impossible to
@@ -73,7 +73,7 @@ _EPSS_MISSING_DEFAULT = 0.5
 # stays neutral. ``not_evaluated`` (no evidence either way) gets a
 # small penalty to nudge operators toward investigating.
 _REACH_NOT_REACHABLE_MAX_REDUCTION = 0.70
-_REACH_NOT_EVALUATED_MULTIPLIER = 0.85
+_REACH_NOT_EVALUATED_MULTIPLIER = 0.935
 
 # Exposure — call-site density. Maps 0.0..1.0 onto 0.5..1.0 so a dep
 # imported once has half the weight of a dep imported throughout the
