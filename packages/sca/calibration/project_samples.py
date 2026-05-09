@@ -330,6 +330,82 @@ PROJECT_SAMPLES: List[ProjectSample] = [
         repo_url="https://github.com/jenkinsci/jenkins.git",
         git_ref="jenkins-2.387.1", license_spdx="MIT",
     ),
+    # ---- Round-6 cold-start fillers (2026-05-09) ---------------------
+    # Round-5 introduced Cargo / NuGet / Packagist with 1 sample each
+    # but per-eco refit needs ≥100 findings to clear the cold-start
+    # gate. Round-6 adds 2-3 app-shaped samples per cold-start eco,
+    # mixing recent (modern dep tree) and vintage (older deps with
+    # accrued KEV / EDB / MSF / PoC signals).
+
+    # Cargo +2: vintage and high-density.
+    # firecracker is AWS's Rust microVM — server-class app with kvm
+    # bindings, vsock, vmm internals; very different surface from
+    # alacritty's terminal stack.
+    ProjectSample(
+        name="firecracker-1.0", ecosystem="Cargo",
+        repo_url="https://github.com/firecracker-microvm/firecracker.git",
+        git_ref="v1.0.0", license_spdx="Apache-2.0",
+    ),
+    # nushell — modern shell written in Rust. 611 packages in
+    # Cargo.lock makes it the deepest Cargo tree we can scan; the
+    # variety pulls in dozens of file-format / plugin / async crates.
+    ProjectSample(
+        name="nushell-0.85", ecosystem="Cargo",
+        repo_url="https://github.com/nushell/nushell.git",
+        git_ref="0.85.0", license_spdx="MIT",
+    ),
+    # alacritty 0.6 — vintage pin (March 2021) of the same project
+    # we have at 0.13. Older dep tree (winit 0.24 era, pre-2.0 wgpu
+    # universe) carries the long-disclosed CVEs that 0.13 has
+    # already upgraded past.
+    ProjectSample(
+        name="alacritty-0.6", ecosystem="Cargo",
+        repo_url="https://github.com/alacritty/alacritty.git",
+        git_ref="v0.6.0", license_spdx="Apache-2.0",
+    ),
+
+    # NuGet +2.
+    # IdentityServer4 3.1 (Dec 2019) — OAuth2/OIDC server, a real
+    # production identity surface. 94 inline-pinned PackageReference
+    # rows across 90 csproj — deep dotnet tree, no CPM workaround
+    # needed.
+    ProjectSample(
+        name="identityserver4-3.1", ecosystem="NuGet",
+        repo_url="https://github.com/IdentityServer/IdentityServer4.git",
+        git_ref="3.1.0", license_spdx="Apache-2.0",
+    ),
+    # PowerShell 6.0 (Jan 2018) — older sibling of powershell-6.2.
+    # Pre-CPM era; deps from 2017-2018 vintage have had 6+ years to
+    # accrue CVE / KEV signals.
+    ProjectSample(
+        name="powershell-6.0", ecosystem="NuGet",
+        repo_url="https://github.com/PowerShell/PowerShell.git",
+        git_ref="v6.0.0", license_spdx="MIT",
+    ),
+
+    # Packagist +3.
+    # bagisto 1.5 — Laravel-based e-commerce. 182 composer packages.
+    ProjectSample(
+        name="bagisto-1.5", ecosystem="Packagist",
+        repo_url="https://github.com/bagisto/bagisto.git",
+        git_ref="v1.5.0", license_spdx="MIT",
+    ),
+    # pterodactyl 0.7 (vintage, ~2018-2019) — older sibling of
+    # pterodactyl-1.11. 127 packages, deps from a pre-2020 Laravel
+    # universe with extensive accrued CVE signal.
+    ProjectSample(
+        name="pterodactyl-0.7", ecosystem="Packagist",
+        repo_url="https://github.com/pterodactyl/panel.git",
+        git_ref="v0.7.19", license_spdx="MIT",
+    ),
+    # cachet 2.4 — open-source status-page app, BSD-3-Clause.
+    # 135 composer packages on a Laravel base; different stack to
+    # both pterodactyl tags.
+    ProjectSample(
+        name="cachet-2.4", ecosystem="Packagist",
+        repo_url="https://github.com/CachetHQ/Cachet.git",
+        git_ref="v2.4.0", license_spdx="BSD-3-Clause",
+    ),
 ]
 
 
