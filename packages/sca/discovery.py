@@ -290,8 +290,22 @@ def _walk(root: Path, max_depth: int, excludes: Set[str]) -> Iterator[Path]:
     root_str = str(root)
     root_depth = len(root.parts)
 
-    # os.walk(followlinks=False) is the canonical no-follow walk.
-    # We mutate dirnames in-place to prune the descent.
+    # os.walk(followlinks=False) is the canonical no-follow walk —
+    # but it still LISTS symlinks in ``filenames``, just doesn't
+    # descend through them. A ``requirements.txt`` that's a symlink
+    # to ``/etc/passwd`` would still be yielded and parsed without
+    # the per-file reject below. Two failure modes worth blocking:
+    #
+    #   1. Operator-visible noise: a shared workspace
+    #      ``requirements.txt`` symlinked into a project tree
+    #      gets flagged against the wrong project.
+    #   2. Confused-deputy disclosure: parser output flows into
+    #      LLM prompts; symlinks pointing at host filesystem
+    #      (``/etc/*``, ``~/.aws/credentials``) leak via prompt.
+    #
+    # Reject symlinks at file level AND at any parent directory —
+    # the file itself may not be a symlink even when reached via
+    # a symlinked parent.
     for dirpath, dirnames, filenames in os.walk(root_str, followlinks=False):
         cur = Path(dirpath)
         depth = len(cur.parts) - root_depth
@@ -310,8 +324,32 @@ def _walk(root: Path, max_depth: int, excludes: Set[str]) -> Iterator[Path]:
             # In-place prune.
             dirnames[:] = [d for d in dirnames if not _should_skip_dir(d, excludes)]
 
+        # Per-iteration: refuse if any parent on the path between
+        # ``root`` and ``cur`` is a symlink. Walked once per dir
+        # rather than per-file so a deep symlink-rooted subtree
+        # doesn't pay the stat cost on every yielded file.
+        parent_symlinked = False
+        check = cur
+        while check != root and check.parent != check:
+            try:
+                if check.is_symlink():
+                    parent_symlinked = True
+                    break
+            except OSError:
+                parent_symlinked = True
+                break
+            check = check.parent
+        if parent_symlinked:
+            continue
+
         for fn in filenames:
-            yield cur / fn
+            p = cur / fn
+            try:
+                if p.is_symlink():
+                    continue
+            except OSError:
+                continue
+            yield p
 
 
 def _is_composite_actions_parent(cur: Path) -> bool:

@@ -64,13 +64,35 @@ def _find_sca_agent() -> Optional[Path]:
     env_path = os.environ.get("RAPTOR_SCA_AGENT")
     if env_path:
         p = Path(env_path).resolve()
-        if p.is_file():
-            return p
-        logger.warning("RAPTOR_SCA_AGENT=%s does not exist — ignoring",
-                       env_path)
-        # Fall through: env override missing is intentional → return
-        # None per the bridge contract test expectations.
-        return None
+        if not p.is_file():
+            logger.warning("RAPTOR_SCA_AGENT=%s does not exist — ignoring",
+                           env_path)
+            return None
+        # Content discriminator: a file CAN exist at the override path
+        # without being a real SCA agent — operator typos, stale
+        # symlinks, sibling-project ``agent.py`` files, placeholder
+        # scripts. Pre-content-check, those silently launched the
+        # wrong subprocess and surfaced as opaque "no SCA findings"
+        # or downstream crashes blamed on raptor-sca itself. The
+        # `from packages.sca import SCA_ALLOWED_HOSTS` import is the
+        # discriminator — every real agent imports it; nothing else
+        # has reason to.
+        try:
+            text = p.read_text(encoding="utf-8")
+        except OSError:
+            logger.warning(
+                "RAPTOR_SCA_AGENT=%s could not be read — ignoring",
+                env_path,
+            )
+            return None
+        if "from packages.sca import SCA_ALLOWED_HOSTS" not in text:
+            logger.warning(
+                "RAPTOR_SCA_AGENT=%s does not look like a raptor-sca "
+                "agent (missing SCA_ALLOWED_HOSTS import) — ignoring",
+                env_path,
+            )
+            return None
+        return p
     return Path(__file__).resolve()
 
 
@@ -109,7 +131,13 @@ def run_sca_subprocess(
         caller_label="sca-agent",
         target=str(target),
         output=str(output_dir),
-        env=env or RaptorConfig.get_safe_env(),
+        # ``env if env is not None`` — pre-fix ``env or`` truthy-tested,
+        # so an EXPLICIT ``env={}`` (caller's "spawn with empty env"
+        # signal) got replaced with the default safe env because
+        # ``{}`` is falsy. The empty-env intent was silently
+        # overridden — sandbox children inherited the caller-default
+        # RAPTOR env when caller had specifically asked for nothing.
+        env=env if env is not None else RaptorConfig.get_safe_env(),
         capture_output=True,
         text=True,
         timeout=timeout,
@@ -151,7 +179,15 @@ def main(argv=None) -> int:
                     help="Disable all sandbox isolation")
     ap.add_argument("--audit", action="store_true")
     ap.add_argument("--audit-verbose", action="store_true")
-    args = ap.parse_args(argv)
+    # ``parse_known_args`` rather than ``parse_args``: SCA is invoked
+    # by raptor.py / ``/agentic --sca`` / future wrappers that pass
+    # the standard RAPTOR run-lifecycle flag set (``--max-cost``,
+    # ``--no-exploits``, ``--no-patches``, etc.). Pre-fix any unknown
+    # flag triggered a SystemExit, breaking the wrapper invocation
+    # path. Wrappers' own argparse already consumes their flags
+    # before forwarding; SCA only needs to silently ignore any that
+    # leak through.
+    args, _unknown = ap.parse_known_args(argv)
 
     sarif_dirs = [Path(p) for p in args.sarif_dirs] if args.sarif_dirs else None
     target = Path(args.repo).resolve()
