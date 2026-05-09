@@ -82,12 +82,19 @@ class PipResolver:
     MANIFEST_FILES = (
         "requirements.txt", "requirements.in", "pyproject.toml",
     )
-    # pypi.org for JSON metadata, files.pythonhosted.org for the
-    # actual wheels pip-compile / pip download for resolution.
-    # Some org pip configs use a private mirror; the sandbox will
-    # surface that as a proxy refusal, which is the right failure
-    # mode (reveals an unallowed dep source).
-    proxy_hosts = ("pypi.org", "files.pythonhosted.org")
+    @property
+    def proxy_hosts(self) -> list:
+        """Egress-proxy hostname allowlist for the pip subprocess.
+
+        Three-layer resolution: operator override
+        (``~/.config/raptor/sca-proxy-hosts.json`` ``"pip"`` key) →
+        calibrated profile → static default
+        (``pypi.org`` + ``files.pythonhosted.org``).
+
+        Org configs on a private mirror should populate the override;
+        the static default covers public PyPI."""
+        from ._proxy_hosts import proxy_hosts_for_pip
+        return proxy_hosts_for_pip()
 
     def is_available(self) -> bool:
         # pip itself ships with every Python install; require a usable

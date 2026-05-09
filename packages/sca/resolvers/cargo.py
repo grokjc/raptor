@@ -39,14 +39,21 @@ class CargoResolver:
 
     ecosystem = "crates.io"
     MANIFEST_FILES = ("Cargo.toml", "Cargo.lock")
-    # crates.io HTTP API + sparse index + the static CDN that serves
-    # ``.crate`` archives. ``index.crates.io`` is the sparse-protocol
-    # endpoint used by Cargo 1.74+ (the default since 1.74).
-    proxy_hosts = (
-        "crates.io",
-        "index.crates.io",
-        "static.crates.io",
-    )
+    @property
+    def proxy_hosts(self) -> list:
+        """Egress-proxy hostname allowlist for the cargo subprocess.
+
+        Three-layer resolution: operator override
+        (``~/.config/raptor/sca-proxy-hosts.json`` ``"cargo"`` key)
+        → calibrated profile → static default
+        (``crates.io`` + ``index.crates.io`` + ``static.crates.io``).
+
+        ``index.crates.io`` is the sparse-protocol endpoint used by
+        Cargo 1.74+ (default since 1.74); operators on alternate
+        registries via ``CARGO_REGISTRIES_*`` should populate the
+        override."""
+        from ._proxy_hosts import proxy_hosts_for_cargo
+        return proxy_hosts_for_cargo()
 
     def is_available(self) -> bool:
         return _check_tool(["cargo", "--version"])

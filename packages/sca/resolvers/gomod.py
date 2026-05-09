@@ -33,11 +33,21 @@ class GoResolver:
 
     ecosystem = "Go"
     MANIFEST_FILES = ("go.mod", "go.sum")
-    # The default Go module proxy + the checksum DB. A target with
-    # ``GOPROXY=direct`` or a private proxy will surface as a proxy
-    # refusal; the right fix is to add the host explicitly per
-    # operator-reviewed config rather than widen the global default.
-    proxy_hosts = ("proxy.golang.org", "sum.golang.org")
+    @property
+    def proxy_hosts(self) -> list:
+        """Egress-proxy hostname allowlist for the go subprocess.
+
+        Three-layer resolution: operator override
+        (``~/.config/raptor/sca-proxy-hosts.json`` ``"gomod"`` key)
+        → calibrated profile (cache-keyed on ``GOPROXY`` /
+        ``GOSUMDB`` / ``GOPRIVATE``) → static default
+        (``proxy.golang.org`` + ``sum.golang.org``).
+
+        A target with ``GOPROXY=direct`` or a private proxy surfaces
+        as a proxy refusal until the host is added to the override
+        — preferred over silently widening the default."""
+        from ._proxy_hosts import proxy_hosts_for_gomod
+        return proxy_hosts_for_gomod()
 
     def is_available(self) -> bool:
         return _check_tool(["go", "version"])

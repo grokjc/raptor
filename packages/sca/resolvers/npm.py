@@ -30,11 +30,20 @@ class NpmResolver:
     # Files the resolver-cache wrapper hashes to key memoisation.
     # See ``_cache.py``. Order doesn't matter — hash sorts by path.
     MANIFEST_FILES = ("package.json", "package-lock.json")
-    # npm's only outbound destination during metadata-only installs.
-    # If a project pins a custom registry via .npmrc, the cascade
-    # validation will fail at the proxy allowlist — that's the
-    # signal to add the host explicitly, not to widen the default.
-    proxy_hosts = ("registry.npmjs.org",)
+    @property
+    def proxy_hosts(self) -> list:
+        """Egress-proxy hostname allowlist for the npm subprocess.
+
+        Three-layer resolution: operator override
+        (``~/.config/raptor/sca-proxy-hosts.json`` ``"npm"`` key) →
+        calibrated profile (cache-keyed on ``NPM_CONFIG_REGISTRY``)
+        → static default (``registry.npmjs.org``).
+
+        Custom-registry projects should add their host via the
+        override config; the cascade validation surfaces the gap as
+        a proxy refusal otherwise."""
+        from ._proxy_hosts import proxy_hosts_for_npm
+        return proxy_hosts_for_npm()
 
     def is_available(self) -> bool:
         return _check_tool(["npm", "--version"])
