@@ -318,6 +318,142 @@ class _CountingHttp(_StubHttp):
         return super().get_json(url, **kw)
 
 
+# ---------------------------------------------------------------------------
+# FROM image refs
+# ---------------------------------------------------------------------------
+
+def _tags_response(tags):
+    import json
+    return _StubResp({"name": "ignored", "tags": tags})
+
+
+def test_from_image_with_clean_semver_tag_becomes_candidate(
+    tmp_path: Path,
+) -> None:
+    """``FROM python:3.11`` → OCI tag lookup → bump candidate
+    to highest stable tag."""
+    (tmp_path / "Dockerfile").write_text(
+        "FROM python:3.11\n"
+    )
+    http = _StubHttp({
+        "https://registry-1.docker.io/v2/library/python/tags/list?n=100":
+            {"name": "library/python",
+             "tags": ["3.11", "3.12", "3.13"]},
+    })
+    report = run_bump(tmp_path, http=http)
+    from_cands = [c for c in report.candidates if c.kind == "from_image"]
+    assert len(from_cands) == 1
+    cand = from_cands[0]
+    assert cand.locator == "docker.io/library/python"
+    assert cand.current_version == "3.11"
+    assert cand.target_version == "3.13"
+    # No bump-tier signals available for OCI yet → Clean.
+    matching_result = [r for r in report.results
+                        if r.candidate is cand][0]
+    assert matching_result.verdict == _VERDICT_CLEAN
+
+
+def test_from_image_variant_tag_silently_skipped(tmp_path: Path) -> None:
+    """``FROM python:3.12-bookworm`` — variant tag, not a clean
+    semver. The walker skips silently (no bump-tier signal we
+    can apply to a variant choice). Not in candidates, not in
+    skipped."""
+    (tmp_path / "Dockerfile").write_text(
+        "FROM python:3.12-bookworm\n"
+    )
+    http = _StubHttp({})
+    report = run_bump(tmp_path, http=http)
+    assert [c for c in report.candidates
+             if c.kind == "from_image"] == []
+    # Not in skipped either — silent skip because we don't have
+    # an upstream-latest path for variant tags.
+    assert all(s[0] != "docker.io/library/python"
+                for s in report.skipped)
+
+
+def test_from_image_digest_pinned_silently_skipped(tmp_path: Path) -> None:
+    """Digest-pinned FROM is immutable — not a bump target."""
+    (tmp_path / "Dockerfile").write_text(
+        "FROM python:3.11@sha256:abc123\n"
+    )
+    http = _StubHttp({})
+    report = run_bump(tmp_path, http=http)
+    assert [c for c in report.candidates
+             if c.kind == "from_image"] == []
+
+
+def test_from_image_stage_reuse_skipped(tmp_path: Path) -> None:
+    """Multi-stage builds: ``FROM build AS runtime`` (where
+    ``build`` is a prior stage name, not an image) shouldn't be
+    bump-attempted."""
+    (tmp_path / "Dockerfile").write_text(
+        "FROM python:3.11 AS build\n"
+        "RUN do-build\n"
+        "FROM build AS runtime\n"
+    )
+    http = _StubHttp({
+        "https://registry-1.docker.io/v2/library/python/tags/list?n=100":
+            {"name": "library/python",
+             "tags": ["3.11", "3.12"]},
+    })
+    report = run_bump(tmp_path, http=http)
+    from_cands = [c for c in report.candidates if c.kind == "from_image"]
+    assert len(from_cands) == 1     # python only, not the stage reuse
+    assert from_cands[0].locator == "docker.io/library/python"
+
+
+def test_from_image_already_at_latest_not_a_candidate(tmp_path: Path) -> None:
+    """FROM at highest stable tag → not a bump target."""
+    (tmp_path / "Dockerfile").write_text("FROM python:3.13\n")
+    http = _StubHttp({
+        "https://registry-1.docker.io/v2/library/python/tags/list?n=100":
+            {"name": "library/python",
+             "tags": ["3.11", "3.12", "3.13"]},
+    })
+    report = run_bump(tmp_path, http=http)
+    assert [c for c in report.candidates
+             if c.kind == "from_image"] == []
+
+
+def test_from_image_apply_writes_dockerfile(tmp_path: Path) -> None:
+    """End-to-end with --apply: FROM gets rewritten in place."""
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text("FROM python:3.11\n")
+    http = _StubHttp({
+        "https://registry-1.docker.io/v2/library/python/tags/list?n=100":
+            {"name": "library/python",
+             "tags": ["3.11", "3.12", "3.13"]},
+    })
+    report = run_bump(tmp_path, http=http, apply=True)
+    assert "FROM python:3.13" in dockerfile.read_text()
+
+
+def test_mixed_arg_and_from_in_one_dockerfile(tmp_path: Path) -> None:
+    """A devcontainer-shaped Dockerfile with both an ARG pin AND
+    a FROM image — both surface as candidates."""
+    dockerfile = tmp_path / "Dockerfile"
+    dockerfile.write_text(
+        "FROM python:3.11\n"
+        "ARG SEMGREP_VERSION=1.50.0\n"
+    )
+    http = _StubHttp({
+        "https://registry-1.docker.io/v2/library/python/tags/list?n=100":
+            {"name": "library/python", "tags": ["3.11", "3.12"]},
+        "https://api.github.com/repos/semgrep/semgrep/releases/latest":
+            {"tag_name": "v1.119.0"},
+    })
+    pypi = _StubPyPI({
+        "semgrep": {"releases": {
+            "1.119.0": [{"upload_time_iso_8601": "2025-12-01T00:00:00Z"}],
+        }},
+    })
+    from datetime import datetime, timezone
+    now = datetime(2026, 5, 11, tzinfo=timezone.utc)
+    report = run_bump(tmp_path, http=http, pypi_client=pypi, now=now)
+    by_kind = {c.kind for c in report.candidates}
+    assert by_kind == {"arg", "from_image"}
+
+
 def test_upstream_lookup_dedups_across_dockerfiles(tmp_path: Path) -> None:
     """Two Dockerfiles both pinning SEMGREP_VERSION should hit
     the upstream-latest endpoint ONCE — the orchestrator caches

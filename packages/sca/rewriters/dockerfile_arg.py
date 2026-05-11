@@ -52,7 +52,12 @@ def _is_dockerfile(path: Path) -> bool:
     return False
 
 
-@register(predicate=_is_dockerfile)
+# NOT @register'd: the Dockerfile predicate is owned by
+# ``dockerfile_from`` which dispatches ARG-shaped edits here
+# internally (locators containing ``/`` route to FROM, the rest
+# to ARG). One predicate registration prevents the
+# first-match-wins dispatcher from picking the wrong rewriter
+# for a mixed-edit batch.
 def rewrite_dockerfile_arg(
     path: Path, edits: List[RewriteEdit],
 ) -> List[RewriteResult]:

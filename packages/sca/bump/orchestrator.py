@@ -57,13 +57,33 @@ _VERDICT_LABEL = {
 
 @dataclass(frozen=True)
 class BumpCandidate:
-    """One proposed bump: where it lives + what we'd change it to."""
+    """One proposed bump: where it lives + what we'd change it to.
 
-    arg_name: str
+    ``kind`` discriminates the surface:
+      * ``"arg"`` — Dockerfile ARG version pin.  ``locator`` is
+        the ARG name (``SEMGREP_VERSION``); ``upstream`` is the
+        ``UpstreamSource`` to query for the target.
+      * ``"from_image"`` — Dockerfile FROM image ref.
+        ``locator`` is ``"{registry}/{repository}"``; ``upstream``
+        is None (the target comes from
+        ``core.upstream_latest.oci_tags``).
+
+    More kinds plug in by adding to this enum + a walker block in
+    ``_enumerate_candidates``."""
+
+    kind: str
+    locator: str
     file: Path
     current_version: str
     target_version: str
-    upstream: UpstreamSource
+    upstream: Optional[UpstreamSource] = None
+
+    @property
+    def arg_name(self) -> str:
+        """Back-compat alias for ARG-pin candidates. Tests + the
+        legacy JSON output read this; keep the name reachable
+        without breaking the refactor."""
+        return self.locator
 
 
 @dataclass
@@ -126,7 +146,7 @@ def run_bump(
         )
         if apply and result.verdict == _VERDICT_CLEAN:
             edit = RewriteEdit(
-                locator=cand.arg_name,
+                locator=cand.locator,
                 old_value=cand.current_version,
                 new_value=cand.target_version,
             )
@@ -222,12 +242,138 @@ def _enumerate_candidates(
                 # Already at latest — not a bump candidate.
                 continue
             candidates.append(BumpCandidate(
-                arg_name=arg_name,
+                kind="arg",
+                locator=arg_name,
                 file=dockerfile,
                 current_version=current,
                 target_version=target_version,
                 upstream=upstream,
             ))
+
+    # FROM image refs — bump candidates from ``FROM
+    # <registry>/<repository>:<tag>`` lines. Tag must be clean-
+    # semver shape (refuses ``python:latest``, ``python:3.12-
+    # bookworm`` — variants aren't bump candidates without a
+    # variant-tag map we don't have).
+    for dockerfile in dockerfiles:
+        try:
+            text = dockerfile.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        from_candidates, from_skipped = _enumerate_from_image_candidates(
+            text=text, dockerfile=dockerfile,
+            http=http, cache=cache,
+            from_cache=latest_cache,
+        )
+        candidates.extend(from_candidates)
+        skipped.extend(from_skipped)
+    return candidates, skipped
+
+
+def _enumerate_from_image_candidates(
+    *,
+    text: str,
+    dockerfile: Path,
+    http,
+    cache,
+    from_cache: dict,
+) -> Tuple[List[BumpCandidate], List[Tuple[str, Path, str]]]:
+    """Walk ``FROM`` instructions in ``text``; emit candidates
+    for image refs with bumpable stable-semver tags.
+
+    Skipped silently:
+      * Digest-pinned FROM (``image@sha256:...``) — immutable
+      * Multi-stage ``FROM x AS y`` where ``x`` references a
+        previous stage by name (no registry component)
+      * Tag is ``latest`` / branch-shaped / variant
+        (``3.12-bookworm``)
+
+    Skipped with explanation:
+      * Upstream lookup fails (registry 404 / network / no
+        stable tag at all)
+    """
+    from core.dockerfile.parser import parse_dockerfile
+    from core.oci.image_ref import parse_image_ref
+    from core.upstream_latest._version_filter import parse_stable
+    from core.upstream_latest.github_releases import (
+        NoStableVersionsFound,
+        UpstreamLookupError,
+    )
+    from core.upstream_latest.oci_tags import latest_tag as oci_latest_tag
+
+    candidates: List[BumpCandidate] = []
+    skipped: List[Tuple[str, Path, str]] = []
+    try:
+        instructions = parse_dockerfile(text)
+    except Exception:                # noqa: BLE001 — parsers must not crash
+        logger.warning("sca.bump: Dockerfile parse failed for %s",
+                        dockerfile, exc_info=True)
+        return candidates, skipped
+    # Track stage names from prior FROM lines so we can skip
+    # ``FROM <stage>`` refs (those reuse a previous stage, not a
+    # real image to bump).
+    stage_names: set = set()
+    for inst in instructions:
+        if inst.directive != "FROM":
+            continue
+        args = inst.args.strip()
+        # ``FROM image AS stage`` — record the stage name + bump
+        # the image portion.
+        as_split = args.split(" AS ", 1)
+        if len(as_split) == 1:
+            as_split = args.split(" as ", 1)
+        image_ref_str = as_split[0].strip()
+        if len(as_split) > 1:
+            stage_names.add(as_split[1].strip())
+        # Reusing a prior stage by name — not a bump target.
+        if image_ref_str in stage_names:
+            continue
+        try:
+            ref = parse_image_ref(image_ref_str)
+        except Exception:            # noqa: BLE001
+            skipped.append((
+                image_ref_str, dockerfile,
+                f"unparseable FROM ref: {image_ref_str}"
+            ))
+            continue
+        # Digest-pinned → immutable, not a bump candidate.
+        if ref.digest:
+            continue
+        if not ref.tag:
+            continue
+        # Tag must be clean stable semver to be bumpable. Variants
+        # (``3.12-bookworm``) and aliases (``latest``) are silently
+        # skipped — we don't have a variant-tag map that says
+        # ``3.12-bookworm`` and ``3.13-bookworm`` are equivalent.
+        if parse_stable(ref.tag) is None:
+            continue
+        locator = f"{ref.registry}/{ref.repository}"
+        cache_key = ("oci_tag", locator)
+        if cache_key in from_cache:
+            target_tag = from_cache[cache_key]
+        else:
+            try:
+                target_tag = oci_latest_tag(
+                    image_ref_str, http=http, cache=cache,
+                )
+            except (UpstreamLookupError, NoStableVersionsFound) as e:
+                skipped.append((
+                    locator, dockerfile,
+                    f"OCI tag lookup failed: {e}",
+                ))
+                from_cache[cache_key] = None
+                continue
+            from_cache[cache_key] = target_tag
+        if not target_tag or target_tag == ref.tag:
+            continue
+        candidates.append(BumpCandidate(
+            kind="from_image",
+            locator=locator,
+            file=dockerfile,
+            current_version=ref.tag,
+            target_version=target_tag,
+            upstream=None,
+        ))
     return candidates, skipped
 
 
@@ -238,8 +384,18 @@ def _evaluate_one(
     npm_client: Optional[NpmClient],
     now: datetime,
 ) -> BumpResult:
-    """Compute the verdict for one bump candidate."""
-    eco_map = _BUILTIN_ARG_MAP.get(cand.arg_name)
+    """Compute the verdict for one bump candidate.
+
+    ARG-kind candidates with a ``_BUILTIN_ARG_MAP`` entry get the
+    full bump-tier verdict (recent_publish via registry metadata,
+    maintainer_change / install_hook for npm). FROM-image-kind
+    and ARG-kind without an eco-map fall through to Clean (no
+    bump-tier signals available for OCI yet — operator review on
+    the suggest-only PR is the gate).
+    """
+    eco_map = None
+    if cand.kind == "arg":
+        eco_map = _BUILTIN_ARG_MAP.get(cand.locator)
     findings: List[SupplyChainFinding] = []
     if eco_map is not None:
         ecosystem, package_name = eco_map
@@ -313,7 +469,8 @@ def render_report(report: BumpReport) -> str:
     if report.candidates:
         lines.append("")
         lines.append(
-            f"  {'ARG':<28} {'Current':<14} {'Target':<14} {'Verdict':<8} Result"
+            f"  {'Kind':<11} {'Locator':<35} "
+            f"{'Current':<14} {'Target':<14} {'Verdict':<8} Result"
         )
         for r in report.results:
             applied = ""
@@ -325,7 +482,8 @@ def render_report(report: BumpReport) -> str:
             elif r.error:
                 applied = f"error: {r.error}"
             lines.append(
-                f"  {r.candidate.arg_name:<28} "
+                f"  {r.candidate.kind:<11} "
+                f"{r.candidate.locator:<35} "
                 f"{r.candidate.current_version:<14} "
                 f"{r.candidate.target_version:<14} "
                 f"{r.verdict_label:<8} {applied}"

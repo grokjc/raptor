@@ -142,7 +142,14 @@ def _resolve(path: Path) -> Optional[RewriterFn]:
 
 
 # Side-effect imports: each module calls register() at import time.
+# ``dockerfile_from`` is the registered dispatch entry point for
+# all Dockerfile edits; it delegates ARG-shaped edits to
+# ``dockerfile_arg`` internally. Order matters here only insofar
+# as ``dockerfile_arg`` must be importable when ``dockerfile_from``
+# tries to delegate, which is naturally satisfied because
+# ``dockerfile_from`` does a deferred import on first delegation.
 from . import dockerfile_arg          # noqa: E402,F401
+from . import dockerfile_from         # noqa: E402,F401
 
 
 __all__ = [
