@@ -28,6 +28,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from typing import List, Optional, Tuple
 
 from ..models import SupplyChainFinding
@@ -267,6 +268,25 @@ def _enumerate_candidates(
         )
         candidates.extend(from_candidates)
         skipped.extend(from_skipped)
+
+    # GitHub Actions ``uses:`` refs — bump candidates from
+    # ``.github/workflows/*.yml`` files. Phase 3.b ships tag-
+    # pinned support only; SHA-pinned refs (raptor's convention)
+    # need a tag→SHA resolver and ship in 3.b.2.
+    workflow_files = _find_gha_workflows(target)
+    for wf in workflow_files:
+        try:
+            text = wf.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        gha_candidates, gha_skipped = _enumerate_gha_uses_candidates(
+            text=text, workflow=wf,
+            http=http, cache=cache,
+            github_token=github_token,
+            uses_cache=latest_cache,
+        )
+        candidates.extend(gha_candidates)
+        skipped.extend(gha_skipped)
     return candidates, skipped
 
 
@@ -427,6 +447,148 @@ def _evaluate_one(
         verdict_label=_VERDICT_LABEL.get(verdict, str(verdict)),
         bump_supply_chain_findings=findings,
     )
+
+
+_USES_RE = re.compile(
+    r"^\s*(?:-\s+)?uses:\s*"             # optional YAML list marker
+    r"(?P<repo>[\w.-]+/[\w.-]+)"        # owner/repo
+    r"(?P<subpath>(?:/[\w./-]+)?)"       # optional sub-action path
+    r"@"
+    r"(?P<ref>[^\s#]+)"                   # ref (up to ws / comment)
+)
+
+
+def _enumerate_gha_uses_candidates(
+    *,
+    text: str,
+    workflow: Path,
+    http,
+    cache,
+    github_token: Optional[str],
+    uses_cache: dict,
+) -> Tuple[List[BumpCandidate], List[Tuple[str, Path, str]]]:
+    """Walk ``uses:`` lines in a GHA workflow file; emit
+    candidates for tag-pinned refs whose upstream has a newer
+    stable tag.
+
+    Skipped silently:
+      * SHA-pinned refs (40-char hex) — Phase 3.b.2 territory
+      * Branch-pinned refs (``@main``, ``@master``) — out of
+        scope for auto-bumper
+      * Refs that aren't clean stable-semver (handled via the
+        github_releases.latest_release path which already
+        filters pre-releases)
+
+    Skipped with explanation:
+      * Upstream lookup fails
+    """
+    from core.upstream_latest._version_filter import parse_stable
+    from core.upstream_latest.github_releases import (
+        NoStableVersionsFound,
+        UpstreamLookupError,
+        latest_release,
+        latest_tag,
+    )
+
+    candidates: List[BumpCandidate] = []
+    skipped: List[Tuple[str, Path, str]] = []
+    for line in text.splitlines():
+        match = _USES_RE.match(line)
+        if match is None:
+            continue
+        repo = match.group("repo")
+        ref = match.group("ref")
+        # SHA-pinned → Phase 3.b.2.
+        if re.fullmatch(r"[a-f0-9]{40}", ref):
+            continue
+        # Branch-shaped → skip (auto-bumper doesn't surface
+        # branch-to-tag transitions yet).
+        if ref in ("main", "master", "develop") or "/" in ref:
+            continue
+        # Must be parseable as semver (``v4``, ``v4.1.0``, ``1.0``).
+        # We use the relaxed `parse_stable` filter — accepts 1-4
+        # part numeric + optional v-prefix.
+        if parse_stable(ref) is None:
+            continue
+        cache_key = ("gha_uses", repo)
+        if cache_key in uses_cache:
+            target_ref = uses_cache[cache_key]
+        else:
+            target_ref = None
+            # GHA actions typically cut proper releases; fall back
+            # to tags if /releases/latest 404s.
+            try:
+                target_ref = latest_release(
+                    repo, http=http, cache=cache,
+                    github_token=github_token,
+                )
+            except UpstreamLookupError:
+                try:
+                    target_ref = latest_tag(
+                        repo, http=http, cache=cache,
+                        github_token=github_token,
+                    )
+                except (UpstreamLookupError, NoStableVersionsFound) as e:
+                    skipped.append((
+                        repo, workflow,
+                        f"upstream lookup failed: {e}"
+                    ))
+                    uses_cache[cache_key] = None
+                    continue
+            uses_cache[cache_key] = target_ref
+        if not target_ref:
+            continue
+        # Normalise both to compare like-shapes. If the current
+        # ref is a major-only (``v4``) and the latest is full
+        # (``v4.2.1``), we'd want to either:
+        #   (a) propose ``v5`` once it exists (major-only roll)
+        #   (b) propose the full version (specific roll)
+        # Renovate uses (a); for our suggest-only flow (a) is
+        # less noisy.
+        if ref == target_ref:
+            continue
+        # If current ref is major-only and target's major is the
+        # same, no candidate (we'd be proposing a same-major
+        # specific roll, which renovate considers a no-op for
+        # major-only pins).
+        if _same_major_pin(ref, target_ref):
+            continue
+        candidates.append(BumpCandidate(
+            kind="gha_uses",
+            locator=repo,
+            file=workflow,
+            current_version=ref,
+            target_version=target_ref,
+            upstream=None,
+        ))
+    return candidates, skipped
+
+
+def _same_major_pin(current: str, target: str) -> bool:
+    """True if ``current`` is a major-only pin (``v4``) and the
+    target is in the same major (``v4.2.1``). Avoids proposing
+    a major-only roll TO a specific version — operators using
+    major-only pins explicitly chose that level."""
+    from core.upstream_latest._version_filter import parse_stable
+    cur = parse_stable(current)
+    tgt = parse_stable(target)
+    if cur is None or tgt is None:
+        return False
+    if len(cur) != 1:
+        return False
+    return cur[0] == tgt[0]
+
+
+def _find_gha_workflows(target: Path) -> List[Path]:
+    """Walk ``target/.github/workflows/`` for YAML files."""
+    workflows_dir = target / ".github" / "workflows"
+    if not workflows_dir.is_dir():
+        return []
+    out: List[Path] = []
+    for path in workflows_dir.iterdir():
+        if path.is_file() and path.suffix in (".yml", ".yaml"):
+            out.append(path)
+    return sorted(out)
 
 
 def _find_dockerfiles(target: Path) -> List[Path]:

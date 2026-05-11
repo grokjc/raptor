@@ -150,6 +150,7 @@ def _resolve(path: Path) -> Optional[RewriterFn]:
 # ``dockerfile_from`` does a deferred import on first delegation.
 from . import dockerfile_arg          # noqa: E402,F401
 from . import dockerfile_from         # noqa: E402,F401
+from . import gha_uses                # noqa: E402,F401
 
 
 __all__ = [

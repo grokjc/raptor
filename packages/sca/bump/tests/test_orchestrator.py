@@ -454,6 +454,147 @@ def test_mixed_arg_and_from_in_one_dockerfile(tmp_path: Path) -> None:
     assert by_kind == {"arg", "from_image"}
 
 
+# ---------------------------------------------------------------------------
+# GHA uses refs (Phase 3.b)
+# ---------------------------------------------------------------------------
+
+def _workflow(tmp_path: Path, name: str, body: str) -> Path:
+    wf = tmp_path / ".github" / "workflows" / name
+    wf.parent.mkdir(parents=True, exist_ok=True)
+    wf.write_text(body)
+    return wf
+
+
+def test_gha_tag_pinned_uses_becomes_candidate(tmp_path: Path) -> None:
+    """Tag-pinned ``uses: foo/bar@v4`` with newer upstream
+    release → bump candidate."""
+    _workflow(tmp_path, "ci.yml",
+              "      - uses: actions/checkout@v4\n")
+    http = _StubHttp({
+        "https://api.github.com/repos/actions/checkout/releases/latest":
+            {"tag_name": "v5"},
+    })
+    report = run_bump(tmp_path, http=http)
+    gha_cands = [c for c in report.candidates if c.kind == "gha_uses"]
+    assert len(gha_cands) == 1
+    c = gha_cands[0]
+    assert c.locator == "actions/checkout"
+    assert c.current_version == "v4"
+    assert c.target_version == "v5"
+
+
+def test_gha_sha_pinned_uses_skipped(tmp_path: Path) -> None:
+    """SHA-pinned ``uses: foo/bar@<40hex>`` — Phase 3.b skips
+    silently (3.b.2 will handle SHA+comment with tag→SHA
+    resolution)."""
+    _workflow(tmp_path, "ci.yml",
+              "      - uses: actions/checkout@"
+              "de0fac2e4500dabe0009e67214ff5f5447ce83dd  # was v6\n")
+    http = _StubHttp({})    # no upstream fetched
+    report = run_bump(tmp_path, http=http)
+    assert [c for c in report.candidates if c.kind == "gha_uses"] == []
+
+
+def test_gha_branch_pinned_uses_skipped(tmp_path: Path) -> None:
+    """Branch-pinned ``uses: foo/bar@main`` — out of scope for
+    auto-bumper (would be a security upgrade, not a bump)."""
+    _workflow(tmp_path, "ci.yml",
+              "      - uses: actions/checkout@main\n")
+    http = _StubHttp({})
+    report = run_bump(tmp_path, http=http)
+    assert [c for c in report.candidates if c.kind == "gha_uses"] == []
+
+
+def test_gha_major_only_pin_no_same_major_bump(tmp_path: Path) -> None:
+    """``uses: foo/bar@v4`` with upstream-latest ``v4.2.1`` —
+    no candidate. Operator chose major-only pinning explicitly;
+    proposing a same-major specific-version roll would be
+    unwanted churn."""
+    _workflow(tmp_path, "ci.yml",
+              "      - uses: actions/checkout@v4\n")
+    http = _StubHttp({
+        "https://api.github.com/repos/actions/checkout/releases/latest":
+            {"tag_name": "v4.2.1"},
+    })
+    report = run_bump(tmp_path, http=http)
+    assert [c for c in report.candidates if c.kind == "gha_uses"] == []
+
+
+def test_gha_major_only_pin_major_bump_is_a_candidate(tmp_path: Path) -> None:
+    """``uses: foo/bar@v4`` with upstream-latest ``v5`` →
+    candidate (cross-major bump is a real change)."""
+    _workflow(tmp_path, "ci.yml",
+              "      - uses: actions/checkout@v4\n")
+    http = _StubHttp({
+        "https://api.github.com/repos/actions/checkout/releases/latest":
+            {"tag_name": "v5"},
+    })
+    report = run_bump(tmp_path, http=http)
+    assert len([c for c in report.candidates
+                 if c.kind == "gha_uses"]) == 1
+
+
+def test_gha_sub_action_path_walker(tmp_path: Path) -> None:
+    """``uses: github/codeql-action/init@v4`` — locator should
+    be ``github/codeql-action`` (the repo, without the subpath)
+    so the upstream lookup hits the right GitHub repo."""
+    _workflow(tmp_path, "codeql.yml",
+              "      - uses: github/codeql-action/init@v4\n"
+              "      - uses: github/codeql-action/analyze@v4\n")
+    http = _StubHttp({
+        "https://api.github.com/repos/github/codeql-action/releases/latest":
+            {"tag_name": "v5"},
+    })
+    report = run_bump(tmp_path, http=http)
+    gha_cands = [c for c in report.candidates if c.kind == "gha_uses"]
+    # Both ``init`` and ``analyze`` sub-actions surface the
+    # same repo (same locator). Walker dedup via cache means we
+    # only hit the upstream once, but each subpath line is its
+    # own candidate.
+    assert len(gha_cands) == 2
+    assert all(c.locator == "github/codeql-action" for c in gha_cands)
+
+
+def test_gha_already_at_latest_no_candidate(tmp_path: Path) -> None:
+    _workflow(tmp_path, "ci.yml",
+              "      - uses: actions/checkout@v5\n")
+    http = _StubHttp({
+        "https://api.github.com/repos/actions/checkout/releases/latest":
+            {"tag_name": "v5"},
+    })
+    report = run_bump(tmp_path, http=http)
+    assert [c for c in report.candidates if c.kind == "gha_uses"] == []
+
+
+def test_gha_apply_writes_workflow_file(tmp_path: Path) -> None:
+    """End-to-end: ``--apply`` rewrites the workflow YAML."""
+    wf = _workflow(tmp_path, "ci.yml",
+                    "      - uses: actions/checkout@v4\n")
+    http = _StubHttp({
+        "https://api.github.com/repos/actions/checkout/releases/latest":
+            {"tag_name": "v5"},
+    })
+    run_bump(tmp_path, http=http, apply=True)
+    assert "uses: actions/checkout@v5" in wf.read_text()
+
+
+def test_gha_upstream_404_falls_back_to_tags(tmp_path: Path) -> None:
+    """Some actions don't cut releases. Walker falls back to
+    /tags (we already shipped ``latest_tag`` in Phase 2.a)."""
+    _workflow(tmp_path, "ci.yml",
+              "      - uses: anthropics/claude-code@v2.0\n")
+    # /releases/latest 404s; /tags returns a list.
+    http = _StubHttp({
+        "https://api.github.com/repos/anthropics/claude-code/tags?per_page=100":
+            [{"name": "v2.1"}, {"name": "v2.0"}],
+    })
+    report = run_bump(tmp_path, http=http)
+    gha_cands = [c for c in report.candidates if c.kind == "gha_uses"]
+    assert len(gha_cands) == 1
+    assert gha_cands[0].current_version == "v2.0"
+    assert gha_cands[0].target_version == "v2.1"
+
+
 def test_upstream_lookup_dedups_across_dockerfiles(tmp_path: Path) -> None:
     """Two Dockerfiles both pinning SEMGREP_VERSION should hit
     the upstream-latest endpoint ONCE — the orchestrator caches
