@@ -104,6 +104,39 @@ Inline-installs emit deps tagged `Debian` / `Red Hat` / `Alpine` /
 (only OSV-queryable for the subset OSV indexes; others appear in
 the SBOM only).
 
+### Risk-scoring coverage caveats
+
+Findings are ranked by a calibrated risk score that combines
+KEV / EPSS / Exploit-DB / Metasploit / OSV-EVIDENCE signals.
+Coverage isn't uniform across ecosystems — three are
+**cold-start** today (per 2026-05-09 validation snapshot):
+
+- **Cargo** (Rust), **NuGet** (.NET), **Packagist** (PHP):
+  zero or near-zero signaled findings even with five
+  ground-truth signal sources combined. Findings still
+  surface; risk-ranking quality is reduced because the
+  underlying CVE-exploit-signal sources structurally
+  under-cover these ecosystems. Adopters relying heavily on
+  risk-ranked output for Rust/.NET/PHP projects should
+  treat the top-N selection as a starting point, not a
+  finished prioritisation.
+- Go / Maven / PyPI / npm have validated_v1 calibration
+  (Spearman ρ 0.50–0.56, top-20 precision 1.0 globally).
+
+**C/C++ coverage** depends on OSV's `OSS-Fuzz` ecosystem
+which indexes ~700 widely-used projects (curl / openssl /
+libpng / sqlite / ffmpeg / …). Long-tail enterprise
+libraries or less-popular projects may return no advisories
+even when CVEs exist for them upstream. Direct GHSA-API
+querying for C/C++ is on the post-release backlog — pull
+forward when this gap bites.
+
+**NVD CPE matching is not implemented** and is unlikely to
+be — CPE's noise structurally outweighs its coverage gains
+for the use cases SCA targets. If you need
+deep-enterprise-CVE coverage that GHSA + OSS-Fuzz can't
+satisfy, a different tool is the right answer.
+
 ---
 
 ## Fix mode
