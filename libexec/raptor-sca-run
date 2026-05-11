@@ -124,87 +124,15 @@ def main(argv=None):
 
 def _parse_analyse(argv):
     p = argparse.ArgumentParser(prog="raptor-sca")
+    # Target is optional here (can fall back to $RAPTOR_CALLER_DIR /
+    # active project); ``packages.sca.cli`` makes it required because
+    # it has no fallback. Every other flag comes from the shared
+    # registrar so the two surfaces don't drift.
     p.add_argument("target", nargs="?",
                    help="path to project (default: active project / "
                         "$RAPTOR_CALLER_DIR)")
-    p.add_argument("--out", help="explicit output directory")
-    p.add_argument("--offline", action="store_true",
-                   help="skip all network calls; use cache only")
-    p.add_argument("--no-cache", action="store_true",
-                   help="bypass disk cache for this run")
-    p.add_argument("--no-kev", action="store_true",
-                   help="skip CISA KEV enrichment")
-    p.add_argument("--no-epss", action="store_true",
-                   help="skip FIRST.org EPSS enrichment")
-    p.add_argument("--no-reachability", action="store_true",
-                   help="skip module-level reachability scan")
-    p.add_argument("--no-supply-chain", action="store_true",
-                   help="skip mechanical supply-chain heuristics")
-    p.add_argument("--html", action="store_true",
-                   help="write a self-contained report.html alongside "
-                        "report.md (CI artefact uploads / compliance "
-                        "attachments)")
-    p.add_argument("--spdx", action="store_true",
-                   help="write an SPDX 2.3 SBOM (sbom.spdx.json) "
-                        "alongside the CycloneDX one")
-    p.add_argument("--include-commented", action="store_true",
-                   help="parse commented-out version-pinned lines as deps; "
-                        "matching CVEs surface at info severity")
-    p.add_argument("--no-inline-installs", action="store_true",
-                   help="skip Dockerfile / devcontainer.json / shell / GHA "
-                        "extraction of pip / apt / yum / dnf / apk installs")
-    p.add_argument(
-        "--no-dockerfile-from", "--no-image-scanning", "--no-base-images",
-        action="store_true", dest="no_dockerfile_from",
-        help="skip ALL image-source scanning — Dockerfile FROM, "
-             "docker-compose ``image:``, GitLab CI ``image:`` / "
-             "``services:``, and Kubernetes ``spec.containers[*].image``. "
-             "The default fetches each unique image from its registry "
-             "and pulls OS package state for OSV lookup. Disable when "
-             "registry access is restricted, when only source-level "
-             "deps matter for this run, or when image scanning is "
-             "dominating wallclock. Aliases: ``--no-image-scanning``, "
-             "``--no-base-images``.",
-    )
-    p.add_argument("--no-resolve-transitive", action="store_true",
-                   help="don't generate a lockfile for manifests that lack one")
-    p.add_argument("--fallback-registry-metadata", action="store_true",
-                   help="approximate transitives from registry metadata "
-                        "when no toolchain is available")
-    p.add_argument("--use-offline-db", action="store_true",
-                   help="route OSV lookups through a local sqlite-backed "
-                        "copy of the OSV daily-dump zips")
-    p.add_argument("--offline-db-path",
-                   help="override the default offline-DB sqlite location")
-    p.add_argument("--baseline", metavar="PATH",
-                   help="emit baseline-delta against a previous findings.json")
-    p.add_argument("--trust-repo", action="store_true",
-                   help="treat the target as trusted (passes through to "
-                        "future sandbox-gated operations)")
-    p.add_argument("--skip-review", action="store_true",
-                   help="skip LLM behavioural review stages")
-    p.add_argument("--skip-triage", action="store_true",
-                   help="skip LLM triage ranking of findings")
-    p.add_argument("--no-llm", action="store_true",
-                   help="umbrella: disable every LLM stage (equivalent to "
-                        "--skip-review --skip-triage and forces off "
-                        "--review-maintainers / --llm-inline-installs / "
-                        "--impact-analysis even if specified)")
-    p.add_argument("--review-maintainers", action="store_true",
-                   help="run LLM maintainer-trust review on all direct deps")
-    p.add_argument("--llm-inline-installs", action="store_true",
-                   help="run LLM pass over Dockerfile/shell/GHA to find deps "
-                        "the mechanical parser missed")
-    p.add_argument("--impact-analysis", action="store_true",
-                   help="run LLM upgrade-impact analysis for proposed "
-                        "version bumps")
-    p.add_argument("--cache-root",
-                   help="override default cache root directory")
-    # CI gate flags — exit 1 if findings exceed thresholds.
-    from packages.sca.thresholds import add_threshold_args
-    add_threshold_args(p)
-    p.add_argument("-v", "--verbose", action="count", default=0,
-                   help="-v INFO, -vv DEBUG (default: WARNING)")
+    from packages.sca._scan_args import add_scan_args
+    add_scan_args(p)
     return p.parse_args(argv)
 
 
@@ -221,16 +149,8 @@ def _run_analyse(argv):
     args = _parse_analyse(argv)
     _configure_logging(args.verbose)
 
-    # --no-llm is the umbrella switch operators reach for when they
-    # want a mechanical-only run (CI-fast-path, offline diagnosis,
-    # fresh-eyes audit). Translate it into the underlying per-stage
-    # flags so every LLM call site honours it without per-site changes.
-    if args.no_llm:
-        args.skip_review = True
-        args.skip_triage = True
-        args.review_maintainers = False
-        args.llm_inline_installs = False
-        args.impact_analysis = False
+    from packages.sca._scan_args import apply_no_llm_umbrella
+    apply_no_llm_umbrella(args)
 
     target = _resolve_target(args.target)
     if target is None:
@@ -267,30 +187,8 @@ def _run_analyse(argv):
         except ImportError:
             pass
 
-    options = RunOptions(
-        offline=args.offline,
-        no_cache=args.no_cache,
-        cache_root=Path(args.cache_root) if args.cache_root else None,
-        enable_kev=not args.no_kev,
-        enable_epss=not args.no_epss,
-        enable_reachability=not args.no_reachability,
-        enable_supply_chain=not args.no_supply_chain,
-        emit_html_report=args.html,
-        emit_spdx_sbom=args.spdx,
-        include_commented=args.include_commented,
-        enable_inline_installs=not args.no_inline_installs,
-        enable_dockerfile_from=not args.no_dockerfile_from,
-        enable_transitive_expansion=not args.no_resolve_transitive,
-        fallback_registry_metadata=args.fallback_registry_metadata,
-        use_offline_db=args.use_offline_db,
-        offline_db_path=(Path(args.offline_db_path)
-                          if args.offline_db_path else None),
-        enable_llm_review=not args.skip_review,
-        enable_triage=not args.skip_triage,
-        review_maintainers=args.review_maintainers,
-        enable_llm_inline_installs=args.llm_inline_installs,
-        enable_impact_analysis=args.impact_analysis,
-    )
+    from packages.sca._scan_args import options_from_args
+    options = options_from_args(args)
 
     try:
         result = run_sca(target=target, output_dir=output_dir, options=options)
@@ -305,6 +203,8 @@ def _run_analyse(argv):
                 baseline_path=Path(args.baseline).resolve(),
                 current_findings=output_dir / "findings.json",
                 output_dir=output_dir,
+                emit_pr_comment=args.pr_comment,
+                pr_comment_label=args.pr_comment_label,
             )
         except Exception as e:              # noqa: BLE001
             print(f"raptor-sca: baseline delta failed: {e}",

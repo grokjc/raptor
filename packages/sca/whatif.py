@@ -380,6 +380,21 @@ def _pairwise_report(
     kev: Optional[KevClient],
     epss: Optional[EpssClient],
 ) -> Tuple[str, int]:
+    # Validate the version pair against the ecosystem comparator
+    # before any network. Pre-fix: unparseable versions silently
+    # produced "0 resolved, 0 regressed" with exit 0 — an operator
+    # typo in a CI pipeline meant the gate falsely reported "safe
+    # upgrade" on an upgrade that never even compared.
+    from .versions import VersionError, compare as _vcompare
+    try:
+        _vcompare(ecosystem, from_version, to_version)
+    except VersionError as exc:
+        return (
+            f"# raptor-sca upgrade — {ecosystem}:{name} "
+            f"{from_version} → {to_version}\n\n"
+            f"**Error:** unparseable version pair: {exc}\n",
+            2,
+        )
     deps = [_synthesise(ecosystem, name, from_version),
             _synthesise(ecosystem, name, to_version)]
     osv_results = osv.query_batch(deps)

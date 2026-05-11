@@ -215,30 +215,9 @@ def _run_analyse(argv: List[str]) -> int:
     output_dir = _resolve_output_dir(args.out, prefix="sca")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    options = RunOptions(
-        offline=args.offline,
-        no_cache=args.no_cache,
-        cache_root=Path(args.cache_root) if args.cache_root else None,
-        enable_kev=not args.no_kev,
-        enable_epss=not args.no_epss,
-        enable_reachability=not args.no_reachability,
-        enable_supply_chain=not args.no_supply_chain,
-        emit_html_report=args.html,
-        include_commented=args.include_commented,
-        enable_inline_installs=not args.no_inline_installs,
-        enable_dockerfile_from=not args.no_dockerfile_from,
-        use_offline_db=args.use_offline_db,
-        offline_db_path=(Path(args.offline_db_path)
-                          if args.offline_db_path else None),
-        enable_transitive_expansion=not args.no_resolve_transitive,
-        fallback_registry_metadata=args.fallback_registry_metadata,
-        enable_llm_review=not args.skip_review,
-        enable_triage=not args.skip_triage,
-        review_maintainers=args.review_maintainers,
-        enable_llm_inline_installs=args.llm_inline_installs,
-        enable_impact_analysis=args.impact_analysis,
-        enable_progress=not args.no_progress,
-    )
+    from ._scan_args import apply_no_llm_umbrella, options_from_args
+    apply_no_llm_umbrella(args)
+    options = options_from_args(args)
 
     try:
         result = run_sca(target=target, output_dir=output_dir, options=options)
@@ -368,172 +347,14 @@ def _parse_analyse_args(argv: Sequence[str]) -> argparse.Namespace:
                     "red flags, and hygiene issues.",
     )
     parser.add_argument("target", help="path to the project to analyse")
-    parser.add_argument(
-        "--out",
-        help="output directory (default: ./out/sca-<UTC timestamp>/)",
-    )
-    parser.add_argument(
-        "--offline", action="store_true",
-        help="skip all network calls; use cache only",
-    )
-    parser.add_argument(
-        "--no-cache", action="store_true",
-        help="bypass disk cache for this run",
-    )
-    parser.add_argument(
-        "--use-offline-db", action="store_true",
-        help="route OSV lookups through a local sqlite-backed copy of the "
-             "OSV daily-dump zips. Downloads per-ecosystem zips on first "
-             "use and refreshes them every 24h. Useful for air-gapped "
-             "environments. Cache lives at "
-             "``~/.raptor/cache/sca/osv.sqlite`` by default.",
-    )
-    parser.add_argument(
-        "--offline-db-path",
-        help="override the default offline-DB sqlite location",
-    )
-    parser.add_argument(
-        "--no-resolve-transitive", action="store_true",
-        help="don't generate a lockfile for manifests that lack one "
-             "(default: run pip-compile / npm install --dry-run / "
-             "cargo update / etc. in the sandbox to recover the "
-             "transitive set)",
-    )
-    parser.add_argument(
-        "--fallback-registry-metadata", action="store_true",
-        help="when no toolchain is available, approximate transitives "
-             "from registry metadata instead. Findings tagged as "
-             "approximate; treat with caution",
-    )
-    parser.add_argument(
-        "--no-kev", action="store_true",
-        help="skip CISA KEV enrichment",
-    )
-    parser.add_argument(
-        "--no-epss", action="store_true",
-        help="skip FIRST.org EPSS enrichment",
-    )
-    parser.add_argument(
-        "--no-reachability", action="store_true",
-        help="skip module-level reachability scan (Python AST + npm imports)",
-    )
-    parser.add_argument(
-        "--no-supply-chain", action="store_true",
-        help="skip mechanical supply-chain heuristics",
-    )
-    parser.add_argument(
-        "--no-progress", action="store_true",
-        help="suppress the multi-stage TTY progress display. The "
-             "display is on by default for interactive runs and "
-             "auto-suppresses when stderr isn't a TTY (pipes / "
-             "CI logs / file redirect); this flag forces off "
-             "explicitly.",
-    )
-    parser.add_argument(
-        "--html", action="store_true",
-        help="write a self-contained report.html alongside "
-             "report.md (suitable for CI artefact uploads / "
-             "compliance attachments)",
-    )
-    parser.add_argument(
-        "--include-commented", action="store_true",
-        help="parse commented-out version-pinned lines (e.g. "
-             "`# z3-solver==4.16.0.0`) as deps; matching CVEs surface "
-             "at info severity",
-    )
-    parser.add_argument(
-        "--trust-repo", action="store_true",
-        help="treat the target as trusted; opt out of safety gates that "
-             "refuse to scan untrusted content. Honoured by future "
-             "sandbox-gated operations (resolver execution, registry "
-             "metadata fetches against untrusted-repo-supplied URLs).",
-    )
-    parser.add_argument(
-        "--baseline", metavar="PATH",
-        help="path to a previous run's findings.json. The run still "
-             "produces full findings.json + report.md, but additionally "
-             "writes baseline-delta.json + baseline-delta.md showing only "
-             "NEW / CLEARED findings since the baseline. Steady-state CI "
-             "pattern: keep CI logs quiet during weeks where nothing "
-             "actually changed.",
-    )
-    parser.add_argument(
-        "--pr-comment", action="store_true",
-        help="when ``--baseline`` is set, additionally write "
-             "``pr-comment.md`` — a tight GitHub-flavoured comment "
-             "with verdict header, new-finding table, and persistent-"
-             "backlog summary, suitable for piping to ``gh pr "
-             "comment --body-file``. CI workflows post this on the PR "
-             "thread so reviewers see the security delta in-line.",
-    )
-    parser.add_argument(
-        "--pr-comment-label", default=None, metavar="LABEL",
-        help="header label for ``--pr-comment`` (default: 'raptor-sca'). "
-             "Operators add commit SHAs / repo names / PR numbers for "
-             "at-a-glance attribution in PR threads.",
-    )
-    parser.add_argument(
-        "--no-inline-installs", action="store_true",
-        help="skip Dockerfile / devcontainer.json / shell-script / GHA "
-             "workflow extraction of pip / apt / yum / dnf / apk installs",
-    )
-    parser.add_argument(
-        "--no-dockerfile-from", "--no-image-scanning", "--no-base-images",
-        action="store_true", dest="no_dockerfile_from",
-        help="skip ALL image-source scanning — Dockerfile FROM, "
-             "docker-compose ``image:``, GitLab CI ``image:`` / "
-             "``services:``, and Kubernetes ``spec.containers[*].image``. "
-             "The default fetches each unique image from its registry "
-             "and pulls OS package state (dpkg / apk / rpm) for OSV "
-             "lookup. Disable when registry access is restricted, when "
-             "the operator only cares about source-level deps, or when "
-             "image scanning is dominating wallclock and the findings "
-             "aren't needed for this run. Aliases: ``--no-image-scanning``, "
-             "``--no-base-images``.",
-    )
-    parser.add_argument(
-        "--skip-review", action="store_true",
-        help="skip LLM behavioural review stages (install-hook, "
-             "maintainer-trust, version-diff)",
-    )
-    parser.add_argument(
-        "--skip-triage", action="store_true",
-        help="skip LLM triage ranking of findings",
-    )
-    parser.add_argument(
-        "--no-llm", action="store_true",
-        help="umbrella: disable every LLM stage (equivalent to "
-             "--skip-review --skip-triage and forces off "
-             "--review-maintainers / --llm-inline-installs / "
-             "--impact-analysis even if specified)",
-    )
-    parser.add_argument(
-        "--review-maintainers", action="store_true",
-        help="run LLM maintainer-trust review on all direct deps, "
-             "not just those with maintainer-churn findings",
-    )
-    parser.add_argument(
-        "--llm-inline-installs", action="store_true",
-        help="run LLM pass over Dockerfile/shell/GHA to find deps "
-             "the mechanical parser missed (default: off)",
-    )
-    parser.add_argument(
-        "--impact-analysis", action="store_true",
-        help="run LLM upgrade-impact analysis for proposed version bumps "
-             "(default: auto when --allow-major is set)",
-    )
-    parser.add_argument(
-        "--cache-root",
-        help="override default ~/.raptor/cache/sca cache root",
-    )
-    # CI gate flags — exit 1 if findings exceed thresholds.
-    from .thresholds import add_threshold_args
-    add_threshold_args(parser)
-    parser.add_argument(
-        "-v", "--verbose", action="count", default=0,
-        help="-v INFO, -vv DEBUG (default: WARNING)",
-    )
+    # Every other scan-mode flag lives in ``_scan_args.add_scan_args``
+    # so the libexec/raptor-sca-run entrypoint gets the same flag
+    # surface without drift. Adding a new flag here is a bug — add
+    # it to ``_scan_args`` instead.
+    from ._scan_args import add_scan_args
+    add_scan_args(parser)
     return parser.parse_args(argv)
+
 
 
 # ---------------------------------------------------------------------------

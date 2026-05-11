@@ -88,6 +88,24 @@ class StubHttp:
 # Pairwise mode
 # ---------------------------------------------------------------------------
 
+def test_pairwise_unparseable_version_exits_2(tmp_path: Path, capsys) -> None:
+    """Operator typos in CI pipelines (``npm lodash 4.17.4 4.17.x``)
+    used to silently emit "0 resolved, 0 regressed" and exit 0 —
+    the gate would falsely report a clean upgrade. Validate the
+    version pair against the ecosystem comparator BEFORE the OSV
+    network call so an unparseable version surfaces as exit 2."""
+    http = StubHttp(version_to_vulns={}, records={})
+    cache = JsonCache(root=tmp_path)
+    rc = whatif.main(["npm", "lodash", "not-a-version", "also-bad"],
+                      http=http, cache=cache)
+    assert rc == 2
+    out = capsys.readouterr().out
+    assert "Error" in out
+    assert "unparseable" in out
+    # No bogus "0 resolved" summary in the output.
+    assert "Resolved: **0**" not in out
+
+
 def test_pairwise_clean_resolution(tmp_path: Path, capsys) -> None:
     """1.0 has GHSA-old, 2.5 has none → upgrade resolves all, no regressions."""
     http = StubHttp(
