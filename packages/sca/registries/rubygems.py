@@ -63,6 +63,68 @@ class RubyGemsClient:
             self._cache.put(cache_key, versions, ttl_seconds=self._ttl)
         return versions
 
+    def get_metadata(self, name: str) -> Optional[dict]:
+        """Aggregate metadata via ``/api/v1/gems/<name>.json``.
+
+        Used by ``_latest_stable_version`` in the transitive-drop
+        detector (turns the gem name into a releases list)."""
+        cache_key = f"rubygems-meta:{name}"
+        if self._cache is not None:
+            cached = self._cache.get(cache_key, ttl_seconds=self._ttl)
+            if cached is not None:
+                return cached
+        if self._offline:
+            return None
+        try:
+            data = self._http.get_json(
+                f"https://rubygems.org/api/v1/gems/{name}.json",
+            )
+        except Exception as e:                # noqa: BLE001
+            logger.warning(
+                "sca.registries.rubygems: meta fetch failed for "
+                "%r: %s", name, e,
+            )
+            return None
+        # Adapt to a ``releases`` shape so _latest_stable_version
+        # finds versions consistently across ecosystems.
+        if isinstance(data, dict):
+            data = {**data, "releases": {data.get("version"): []}}
+        if self._cache is not None:
+            self._cache.put(cache_key, data, ttl_seconds=self._ttl)
+        return data
+
+    def get_version_metadata(
+        self, name: str, version: str,
+    ) -> Optional[dict]:
+        """Fetch per-version metadata via
+        ``/api/v2/rubygems/<name>/versions/<ver>.json``.
+
+        Returns the version's structured data including
+        ``dependencies: {runtime: [...], development: [...]}``.
+        Used by the transitive-drop detector to diff dep state
+        across versions."""
+        cache_key = f"rubygems-vmeta:{name}:{version}"
+        if self._cache is not None:
+            cached = self._cache.get(cache_key, ttl_seconds=self._ttl)
+            if cached is not None:
+                return cached
+        if self._offline:
+            return None
+        try:
+            data = self._http.get_json(
+                f"https://rubygems.org/api/v2/rubygems/{name}/"
+                f"versions/{version}.json",
+            )
+        except Exception as e:                # noqa: BLE001
+            logger.warning(
+                "sca.registries.rubygems: version-meta fetch failed "
+                "for %r==%r: %s", name, version, e,
+            )
+            return None
+        if self._cache is not None:
+            self._cache.put(cache_key, data, ttl_seconds=self._ttl)
+        return data
+
 
 def _extract_versions(data) -> List[str]:
     """Pull stable, non-yanked versions from the RubyGems response.

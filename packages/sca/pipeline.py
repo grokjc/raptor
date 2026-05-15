@@ -575,15 +575,25 @@ def run_sca(
     # rides alongside the underlying CVE.
     if (options.enable_supply_chain and not options.offline):
         from .registries.pypi import PyPIClient as _PypiC
+        from .registries.npm import NpmClient as _NpmC
+        from .registries.crates import CratesClient as _CratesC
+        from .registries.packagist import PackagistClient as _PackC
+        from .registries.rubygems import RubyGemsClient as _GemC
         from .transitive_drop import detect_droppable_transitives
-        td_pypi = _PypiC(http, cache, offline=options.offline)
         progress.stage("transitive-drop")
         drop_findings = detect_droppable_transitives(
             joined,
             vuln_findings=vuln_findings,
             supply_chain_findings=supply_chain_findings,
             hygiene_findings=hygiene_findings,
-            pypi_client=td_pypi,
+            pypi_client=_PypiC(http, cache, offline=options.offline),
+            npm_client=_NpmC(http, cache, offline=options.offline),
+            cargo_client=_CratesC(http, cache, offline=options.offline),
+            composer_client=_PackC(http, cache, offline=options.offline),
+            rubygems_client=_GemC(http, cache, offline=options.offline),
+            # Maven + NuGet clients land in follow-up commits;
+            # the detector silently skips ecosystems with no
+            # client passed.
         )
         from .transitive_drop.adapter import to_supply_chain_findings
         td_sc = to_supply_chain_findings(drop_findings)

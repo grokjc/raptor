@@ -64,18 +64,43 @@ class PackagistClient:
         if self._offline:
             return []
 
-        try:
-            data = self._http.get_json(
-                f"https://repo.packagist.org/p2/{name}.json")
-        except Exception as e:                # noqa: BLE001
-            logger.warning("sca.registries.packagist: fetch failed for %r: %s",
-                           name, e)
+        data = self.get_metadata(name)
+        if data is None:
             return []
-
         versions = _extract_versions(data, name)
         if self._cache is not None:
             self._cache.put(cache_key, versions, ttl_seconds=self._ttl)
         return versions
+
+    def get_metadata(self, name: str) -> Optional[dict]:
+        """Return the raw /p2 packagist response for a package.
+
+        Used by the transitive-drop detector to inspect per-version
+        ``require`` / ``require-dev`` / ``suggest`` blocks across
+        versions. Cached separately from the version list so callers
+        needing the dep blocks don't double-fetch."""
+        if "/" not in name:
+            return None
+        cache_key = f"packagist-meta:{name}"
+        if self._cache is not None:
+            cached = self._cache.get(cache_key, ttl_seconds=self._ttl)
+            if cached is not None:
+                return cached
+        if self._offline:
+            return None
+        try:
+            data = self._http.get_json(
+                f"https://repo.packagist.org/p2/{name}.json",
+            )
+        except Exception as e:                # noqa: BLE001
+            logger.warning(
+                "sca.registries.packagist: meta fetch failed for %r: %s",
+                name, e,
+            )
+            return None
+        if self._cache is not None:
+            self._cache.put(cache_key, data, ttl_seconds=self._ttl)
+        return data
 
 
 def _extract_versions(data: dict, name: str) -> List[str]:

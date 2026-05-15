@@ -49,22 +49,73 @@ class CratesClient:
             cached = self._cache.get(cache_key, ttl_seconds=self._ttl)
             if cached is not None:
                 return list(cached)
-
         if self._offline:
             return []
-
-        try:
-            data = self._http.get_json(
-                f"https://crates.io/api/v1/crates/{name}")
-        except Exception as e:                # noqa: BLE001
-            logger.warning("sca.registries.crates: fetch failed for %r: %s",
-                           name, e)
+        data = self.get_metadata(name)
+        if data is None:
             return []
-
         versions = _extract_versions(data)
         if self._cache is not None:
             self._cache.put(cache_key, versions, ttl_seconds=self._ttl)
         return versions
+
+    def get_metadata(self, name: str) -> Optional[dict]:
+        """Return the raw crates.io aggregate response."""
+        cache_key = f"crates-meta:{name}"
+        if self._cache is not None:
+            cached = self._cache.get(cache_key, ttl_seconds=self._ttl)
+            if cached is not None:
+                return cached
+        if self._offline:
+            return None
+        try:
+            data = self._http.get_json(
+                f"https://crates.io/api/v1/crates/{name}",
+            )
+        except Exception as e:                # noqa: BLE001
+            logger.warning(
+                "sca.registries.crates: meta fetch failed for %r: %s",
+                name, e,
+            )
+            return None
+        if self._cache is not None:
+            self._cache.put(cache_key, data, ttl_seconds=self._ttl)
+        return data
+
+    def get_version_dependencies(
+        self, name: str, version: str,
+    ) -> Optional[list]:
+        """Fetch per-version deps from
+        ``/api/v1/crates/<crate>/<version>/dependencies``.
+
+        Returns the deps list (each row carries ``crate_id``,
+        ``kind``, ``optional``, ``features``, ``default_features``,
+        etc.); None on miss / offline. Used by the
+        transitive-drop detector."""
+        cache_key = f"crates-deps:{name}:{version}"
+        if self._cache is not None:
+            cached = self._cache.get(cache_key, ttl_seconds=self._ttl)
+            if cached is not None:
+                return list(cached)
+        if self._offline:
+            return None
+        try:
+            data = self._http.get_json(
+                f"https://crates.io/api/v1/crates/{name}/"
+                f"{version}/dependencies",
+            )
+        except Exception as e:                # noqa: BLE001
+            logger.warning(
+                "sca.registries.crates: deps fetch failed for "
+                "%r@%r: %s", name, version, e,
+            )
+            return None
+        deps = data.get("dependencies") if isinstance(data, dict) else None
+        if not isinstance(deps, list):
+            return None
+        if self._cache is not None:
+            self._cache.put(cache_key, deps, ttl_seconds=self._ttl)
+        return deps
 
 
 def _extract_versions(data: dict) -> List[str]:
