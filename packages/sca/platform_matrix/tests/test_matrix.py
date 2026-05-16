@@ -183,3 +183,242 @@ def test_discover_excludes_out_directories(tmp_path: Path) -> None:
     libcs = {p.libc for p in matrix}
     assert LibcVersion("glibc", (2, 36)) in libcs
     assert LibcVersion("glibc", (2, 39)) not in libcs
+
+
+# ---------------------------------------------------------------------------
+# buildx bake configs
+# ---------------------------------------------------------------------------
+
+def test_discover_bake_hcl_single_target(tmp_path: Path) -> None:
+    """A docker-bake.hcl with a single target's multi-arch
+    platforms list contributes those arches to the matrix."""
+    (tmp_path / "docker-bake.hcl").write_text('''\
+target "default" {
+  platforms = ["linux/amd64", "linux/arm64", "linux/arm/v7"]
+}
+''')
+    matrix = discover_platform_matrix(tmp_path)
+    arches = {p.arch for p in matrix}
+    assert "x86_64" in arches
+    assert "aarch64" in arches
+    assert "armv7l" in arches
+
+
+def test_discover_bake_hcl_multiline(tmp_path: Path) -> None:
+    """Multi-line ``platforms = [...]`` list with comments is
+    handled — operators format bake configs verbosely."""
+    (tmp_path / "docker-bake.hcl").write_text('''\
+target "release" {
+  platforms = [
+    "linux/amd64",        // x86 servers
+    "linux/arm64",        // graviton / apple silicon
+    "linux/ppc64le",
+  ]
+}
+''')
+    matrix = discover_platform_matrix(tmp_path)
+    arches = {p.arch for p in matrix}
+    assert "x86_64" in arches
+    assert "aarch64" in arches
+    assert "ppc64le" in arches
+
+
+def test_discover_bake_hcl_multiple_targets(tmp_path: Path) -> None:
+    """Each ``target`` block contributes its own platforms;
+    set-based dedup means overlap is free."""
+    (tmp_path / "docker-bake.hcl").write_text('''\
+target "amd64-only" {
+  platforms = ["linux/amd64"]
+}
+target "release" {
+  platforms = ["linux/amd64", "linux/arm64", "linux/s390x"]
+}
+''')
+    matrix = discover_platform_matrix(tmp_path)
+    arches = {p.arch for p in matrix}
+    assert "x86_64" in arches
+    assert "aarch64" in arches
+    assert "s390x" in arches
+
+
+def test_discover_bake_json(tmp_path: Path) -> None:
+    """JSON variant — same semantics, structured shape."""
+    (tmp_path / "docker-bake.json").write_text('''\
+{
+  "target": {
+    "default": {
+      "platforms": ["linux/amd64", "linux/arm64"]
+    },
+    "extra": {
+      "platforms": ["linux/386"]
+    }
+  }
+}
+''')
+    matrix = discover_platform_matrix(tmp_path)
+    arches = {p.arch for p in matrix}
+    assert "x86_64" in arches
+    assert "aarch64" in arches
+    assert "i686" in arches
+
+
+def test_discover_bake_malformed_json_does_not_crash(tmp_path: Path) -> None:
+    """Operator typo → broken JSON. Walker logs + moves on; other
+    signals still register normally."""
+    (tmp_path / "docker-bake.json").write_text('{"target": {broken')
+    (tmp_path / "Dockerfile").write_text("FROM python:3.13-bookworm\n")
+    matrix = discover_platform_matrix(tmp_path)
+    # Dockerfile still contributed; the broken bake didn't kill anything.
+    libcs = {p.libc for p in matrix}
+    assert LibcVersion("glibc", (2, 36)) in libcs
+
+
+def test_discover_bake_override_layered_on(tmp_path: Path) -> None:
+    """``docker-bake.override.hcl`` ADDS to the base config (set
+    union semantics)."""
+    (tmp_path / "docker-bake.hcl").write_text('''\
+target "default" {
+  platforms = ["linux/amd64"]
+}
+''')
+    (tmp_path / "docker-bake.override.hcl").write_text('''\
+target "default" {
+  platforms = ["linux/arm64"]
+}
+''')
+    matrix = discover_platform_matrix(tmp_path)
+    arches = {p.arch for p in matrix}
+    assert "x86_64" in arches
+    assert "aarch64" in arches
+
+
+# ---------------------------------------------------------------------------
+# GHA docker/build-push-action step input
+# ---------------------------------------------------------------------------
+
+def test_discover_gha_build_push_action_platforms(tmp_path: Path) -> None:
+    """``docker/build-push-action`` with explicit ``platforms:`` is
+    the dominant modern multi-arch release pipeline. Walker lifts
+    the arches into the matrix even when ``runs-on:`` is just
+    ubuntu-latest (x86_64 runner + QEMU emulation for arm64)."""
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "release.yml").write_text('''\
+name: release
+on: [push]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+''')
+    matrix = discover_platform_matrix(tmp_path)
+    arches = {p.arch for p in matrix}
+    assert "aarch64" in arches, (
+        f"build-push-action's arm64 missed; got {arches}"
+    )
+
+
+def test_discover_gha_build_push_action_inline_list(tmp_path: Path) -> None:
+    """YAML inline-list variant: ``platforms: [linux/amd64, linux/arm64]``."""
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "release.yml").write_text('''\
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/build-push-action@v5
+        with:
+          platforms: [linux/amd64, linux/arm64, linux/arm/v7]
+''')
+    matrix = discover_platform_matrix(tmp_path)
+    arches = {p.arch for p in matrix}
+    assert {"x86_64", "aarch64", "armv7l"}.issubset(arches), (
+        f"missed an inline-list arch; got {arches}"
+    )
+
+
+def test_discover_gha_build_push_skips_variable_refs(tmp_path: Path) -> None:
+    """``platforms: ${{ matrix.platforms }}`` — operator-driven
+    template. We can't resolve the variable; skip gracefully."""
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "release.yml").write_text('''\
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/build-push-action@v5
+        with:
+          platforms: ${{ matrix.platforms }}
+''')
+    # Should not crash; no aarch64 (variable couldn't be resolved)
+    matrix = discover_platform_matrix(tmp_path)
+    # Default x86_64 still contributed via runs-on parsing
+    arches = {p.arch for p in matrix}
+    assert "x86_64" in arches
+
+
+def test_discover_gha_build_push_two_steps(tmp_path: Path) -> None:
+    """Two separate build-push-action steps in one workflow each
+    contribute their own platforms (set dedup combines)."""
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "release.yml").write_text('''\
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/build-push-action@v5
+        with:
+          platforms: linux/amd64
+      - run: echo "between steps"
+      - uses: docker/build-push-action@v5
+        with:
+          platforms: linux/arm64,linux/ppc64le
+''')
+    matrix = discover_platform_matrix(tmp_path)
+    arches = {p.arch for p in matrix}
+    assert {"x86_64", "aarch64", "ppc64le"}.issubset(arches)
+
+
+# ---------------------------------------------------------------------------
+# Combined: Dockerfile + GHA build-push-action
+# ---------------------------------------------------------------------------
+
+def test_dockerfile_platform_amd64_only_overridden_by_gha(tmp_path: Path) -> None:
+    """The classic bite: Dockerfile says ``--platform=linux/amd64``
+    (operator intent: only x86_64), but the GHA pipeline actually
+    builds for arm64 too via buildx. Our matrix should reflect the
+    GHA's truth — the deployment target."""
+    (tmp_path / "Dockerfile").write_text(
+        "FROM --platform=linux/amd64 python:3.13-bookworm\n"
+    )
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "release.yml").write_text('''\
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: docker/build-push-action@v5
+        with:
+          platforms: linux/amd64,linux/arm64
+''')
+    matrix = discover_platform_matrix(tmp_path)
+    arches = {p.arch for p in matrix}
+    # Dockerfile contributed x86_64+glibc 2.36 (the libc-resolved
+    # entry). build-push-action additionally contributed aarch64
+    # (with libc=None — the wheel-compat layer treats it as
+    # "no libc constraint").
+    assert "x86_64" in arches
+    assert "aarch64" in arches, (
+        f"missed aarch64 from build-push-action override; arches={arches}"
+    )

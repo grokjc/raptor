@@ -21,7 +21,20 @@ Discovery sources (in walk order):
 2. **.devcontainer/devcontainer.json** — ``image:`` field or
    ``build.dockerfile`` pointer. Same libc resolution as Dockerfile.
 
-3. **GitHub Actions** — ``.github/workflows/*.yml`` ``runs-on:``
+3. **buildx bake configs** — ``docker-bake.{hcl,json}`` + override
+   variants. Declares multi-arch build targets via
+   ``platforms = ["linux/amd64", "linux/arm64", ...]``. The
+   project's true deployment surface when ``docker buildx bake`` is
+   the release driver; the Dockerfile's own ``--platform=`` may
+   declare narrower targets that don't reflect production.
+
+4. **GHA ``docker/build-push-action`` step inputs** — the dominant
+   modern multi-arch release pipeline. ``with: platforms:
+   linux/amd64,linux/arm64`` declares the OUTPUT image's arches
+   independent of ``runs-on:`` (which is the runner arch — usually
+   x86_64 + QEMU emulation for arm64).
+
+5. **GitHub Actions** — ``.github/workflows/*.yml`` ``runs-on:``
    values. Standard runner labels map to known platforms. Matrix
    strategies (``strategy.matrix.platform``) multiply the set.
 
@@ -242,6 +255,166 @@ def _walk_devcontainer(
 
 
 # ---------------------------------------------------------------------------
+# buildx bake (docker-bake.hcl / docker-bake.json)
+# ---------------------------------------------------------------------------
+
+# Filenames docker buildx recognises by default (the override
+# variants get loaded when present, on top of the base file).
+_BAKE_HCL_NAMES = (
+    "docker-bake.hcl", "docker-bake.override.hcl",
+)
+_BAKE_JSON_NAMES = (
+    "docker-bake.json", "docker-bake.override.json",
+)
+
+# Regex over an HCL bake file. Matches both single-line and
+# multi-line list shapes:
+#   platforms = ["linux/amd64", "linux/arm64"]
+#   platforms = [
+#     "linux/amd64",
+#     "linux/arm64",
+#   ]
+# Non-greedy + DOTALL captures up to the first closing bracket.
+# Mismatch-tolerant: HCL allows comments inside the list, our
+# regex eats them as part of the captured group and splits on
+# comma afterwards (string-stripping handles whitespace).
+_BAKE_PLATFORMS_RE = re.compile(
+    r"platforms\s*=\s*\[(?P<list>[^\]]*?)\]", re.DOTALL,
+)
+
+
+def _extract_platforms_from_text(captured: str) -> Iterable[str]:
+    """Split a bake ``platforms = [...]`` list-body into individual
+    platform strings. Tolerates inline ``//`` + ``#`` comments +
+    trailing commas + mixed quoting; returns the de-quoted, trimmed
+    values."""
+    # Strip line comments BEFORE splitting on comma. Otherwise an
+    # entry like ``"linux/amd64", // x86 servers`` parses as two
+    # items: the value and "// x86 servers\nlinux/arm64..." which
+    # makes the next value vanish into a comment-prefixed string.
+    cleaned_lines = []
+    for line in captured.splitlines():
+        # ``//`` comment — HCL form
+        if "//" in line:
+            line = line.split("//", 1)[0]
+        # ``#`` comment — also HCL-allowed
+        if "#" in line:
+            line = line.split("#", 1)[0]
+        cleaned_lines.append(line)
+    captured = "\n".join(cleaned_lines)
+
+    for raw in captured.split(","):
+        item = raw.strip()
+        if not item:
+            continue
+        # Strip surrounding quotes (single or double)
+        if (item.startswith('"') and item.endswith('"')) or (
+                item.startswith("'") and item.endswith("'")):
+            item = item[1:-1]
+        if item:
+            yield item
+
+
+def _walk_bake_hcl(
+    path: Path, matrix: ProjectPlatformMatrix,
+) -> None:
+    """Parse a ``docker-bake.hcl`` and lift any ``platforms = [...]``
+    into the matrix.
+
+    Caveats — by design:
+
+    * We don't resolve HCL variables (``platforms = var.platforms``).
+      Bake configs that funnel through a variable just won't
+      contribute; the trade-off is "regex" vs. depending on
+      python-hcl2.
+    * We don't model ``inherits = [...]``; each target's own
+      ``platforms`` block is read in isolation. Most real bake
+      configs declare platforms at target level rather than
+      relying on inheritance for them.
+    * Comments inside a ``platforms`` list are stripped. Other
+      file-level comments are irrelevant — we only look at
+      ``platforms = [...]`` shapes.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        logger.debug("platform_matrix: failed to read %s: %s", path, e)
+        return
+
+    for match in _BAKE_PLATFORMS_RE.finditer(text):
+        captured = match.group("list")
+        for platform_ref in _extract_platforms_from_text(captured):
+            # Bake platform refs look like Docker's ``linux/amd64``
+            # form. ``_canonical_arch`` already maps these.
+            arch = _canonical_arch(platform_ref)
+            if not arch:
+                continue
+            matrix.add(PlatformPair(
+                arch=arch, libc=None,
+                source=f"docker-bake.hcl platforms in {path.name}",
+            ))
+
+
+def _walk_bake_json(
+    path: Path, matrix: ProjectPlatformMatrix,
+) -> None:
+    """Same as :func:`_walk_bake_hcl` but for the JSON variant.
+
+    JSON shape:
+      ``{"target": {"<name>": {"platforms": [...]}}}``
+    Some configs use ``"group"`` blocks too; those carry target
+    refs not platforms, so we ignore them.
+    """
+    import json
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        data = json.loads(text)
+    except (OSError, json.JSONDecodeError) as e:
+        logger.debug(
+            "platform_matrix: failed to parse %s as bake JSON: %s",
+            path, e,
+        )
+        return
+
+    targets = data.get("target") if isinstance(data, dict) else None
+    if not isinstance(targets, dict):
+        return
+    for target_data in targets.values():
+        if not isinstance(target_data, dict):
+            continue
+        platforms = target_data.get("platforms")
+        if not isinstance(platforms, list):
+            continue
+        for platform_ref in platforms:
+            if not isinstance(platform_ref, str):
+                continue
+            arch = _canonical_arch(platform_ref)
+            if not arch:
+                continue
+            matrix.add(PlatformPair(
+                arch=arch, libc=None,
+                source=f"docker-bake.json platforms in {path.name}",
+            ))
+
+
+def _walk_bake_configs(
+    target: Path, matrix: ProjectPlatformMatrix,
+) -> None:
+    """Walk the conventional ``docker-bake.{hcl,json}`` filenames at
+    the repo root. Override variants get walked when present —
+    they layer on top, contributing additional platforms (set-
+    based dedup means duplicates are free)."""
+    for name in _BAKE_HCL_NAMES:
+        path = target / name
+        if path.is_file():
+            _walk_bake_hcl(path, matrix)
+    for name in _BAKE_JSON_NAMES:
+        path = target / name
+        if path.is_file():
+            _walk_bake_json(path, matrix)
+
+
+# ---------------------------------------------------------------------------
 # GHA workflows
 # ---------------------------------------------------------------------------
 
@@ -288,6 +461,86 @@ def _walk_gha_workflows(
                         _add_runner(item, matrix, wf)
                 continue
             _add_runner(value, matrix, wf)
+
+        # ``docker/build-push-action`` step inputs declare the
+        # output image's target arches — independent of ``runs-on:``
+        # which is the RUNNER arch (typically x86_64 + QEMU
+        # emulation for multi-arch builds). Without this, projects
+        # using buildx in CI to ship multi-arch images surface only
+        # the runner arch and we'd silently miss aarch64-only
+        # wheel-compat bites.
+        _extract_gha_build_push_platforms(text, matrix, wf)
+
+
+# Match a ``- uses: docker/build-push-action@...`` step line, then
+# look ahead for the next ``platforms:`` value at any indent — the
+# YAML structure puts the input under ``with:`` two indent levels
+# down, but we don't need to validate it. We only stop scanning
+# when we hit the NEXT ``- uses:`` step (boundary).
+#
+# Same regex-tolerant approach the ``runs-on:`` parser uses — a
+# grammar-incomplete workflow (in-flight edit, typo) doesn't take
+# down discovery.
+_BUILD_PUSH_USES_RE = re.compile(
+    r"^\s*-\s*uses:\s*docker/build-push-action@[^\s\n]+",
+    re.MULTILINE,
+)
+_NEXT_STEP_BOUNDARY_RE = re.compile(
+    r"^\s*-\s*(?:uses|run|name):", re.MULTILINE,
+)
+_PLATFORMS_INPUT_RE = re.compile(
+    r"^\s*platforms:\s*([^\n#]+)", re.MULTILINE,
+)
+
+
+def _extract_gha_build_push_platforms(
+    text: str,
+    matrix: ProjectPlatformMatrix,
+    workflow: Path,
+) -> None:
+    """For each ``docker/build-push-action`` step, find the
+    ``platforms:`` value inside its block and lift each
+    comma-separated arch into the matrix.
+
+    libc=None on every entry — buildx step inputs don't declare
+    a base image; the Dockerfile walker contributes the libc per
+    arch via its FROM-line resolution. Set-based dedup means the
+    Dockerfile's more-specific ``(arch, libc=glibc-2.36)`` and
+    our ``(arch, libc=None)`` both stay in the matrix; downstream
+    wheel-compat treats libc=None as "no libc constraint" which
+    is the lenient behaviour and correct here (build-push-action
+    doesn't constrain libc on its own).
+    """
+    for use_match in _BUILD_PUSH_USES_RE.finditer(text):
+        step_start = use_match.end()
+        # Find the next step boundary OR end of file to scope our
+        # ``platforms:`` search to THIS step's block.
+        boundary = _NEXT_STEP_BOUNDARY_RE.search(text, pos=step_start)
+        step_end = boundary.start() if boundary else len(text)
+        block = text[step_start:step_end]
+        platforms_match = _PLATFORMS_INPUT_RE.search(block)
+        if platforms_match is None:
+            continue
+        value = platforms_match.group(1).strip().strip("'\"")
+        # ``platforms: linux/amd64,linux/arm64`` — comma-separated.
+        # Also handle YAML list inline shape: ``[linux/amd64, ...]``.
+        value = value.strip("[]")
+        for raw in value.split(","):
+            platform_ref = raw.strip().strip("'\"")
+            if not platform_ref or "${{" in platform_ref:
+                # Skip variable references — we can't resolve
+                # GHA expression syntax here.
+                continue
+            arch = _canonical_arch(platform_ref)
+            if not arch:
+                continue
+            matrix.add(PlatformPair(
+                arch=arch, libc=None,
+                source=(
+                    f"GHA docker/build-push-action platforms in "
+                    f"{workflow.name}"
+                ),
+            ))
 
 
 def _add_runner(
@@ -361,8 +614,8 @@ def _iter_dockerfiles(target: Path) -> Iterable[Path]:
 
 
 def discover_platform_matrix(target: Path) -> ProjectPlatformMatrix:
-    """Walk ``target`` for Dockerfile / devcontainer / GHA-workflow
-    signals and return the aggregated platform matrix.
+    """Walk ``target`` for Dockerfile / devcontainer / buildx-bake /
+    GHA-workflow signals and return the aggregated platform matrix.
 
     If no signals are found, returns a default of
     ``{(x86_64, glibc 2.17)}`` — the manylinux2014 baseline, which
@@ -376,6 +629,12 @@ def discover_platform_matrix(target: Path) -> ProjectPlatformMatrix:
     devcontainer = target / ".devcontainer" / "devcontainer.json"
     if devcontainer.exists():
         _walk_devcontainer(devcontainer, matrix)
+
+    # buildx bake configs at the repo root — declares multi-arch
+    # release targets independently of the Dockerfile. Read BEFORE
+    # GHA walking so platforms appear in matrix-source-order from
+    # most-authoritative (release configs) to least (CI runners).
+    _walk_bake_configs(target, matrix)
 
     _walk_gha_workflows(target, matrix)
 
