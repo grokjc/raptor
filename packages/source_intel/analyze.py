@@ -128,6 +128,42 @@ class AbortEvidence:
 
 
 @dataclass(frozen=True)
+class WarnEvidence:
+    """A single observation of a non-aborting runtime-warning call
+    (WARN_ON / pr_warn / KASAN_REPORT etc.).
+
+    INFORMATIONAL only — warn-class doesn't terminate execution, so
+    a verdict policy can't suppress on its presence. Surfaces to
+    Stage D LLM as "the runtime emits a warning here" context.
+    """
+
+    warn_fn: str
+    location: Tuple[str, int]
+    enclosing_function: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class NullGuardEvidence:
+    """A single observation of an explicit NULL-check site.
+
+    Sub-kinds:
+      * ``bang`` — `if (!e)`
+      * ``eq_null`` — `if (e == NULL)`
+      * ``is_err`` — `IS_ERR(e)` / `IS_ERR_OR_NULL(e)`
+
+    INFORMATIONAL only in Phase 12 — axis-3's unchecked_alloc rule
+    already uses null-check presence implicitly (via cocci `when !=`)
+    to suppress unchecked-alloc claims. This dataclass makes those
+    checks visible to consumers (Stage D / `/exploit`) as standalone
+    evidence, with locations.
+    """
+
+    kind: str  # "bang" | "eq_null" | "is_err"
+    location: Tuple[str, int]
+    enclosing_function: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class HazardEvidence:
     """A single observation of an axis-7 hazardous code pattern.
 
@@ -295,6 +331,12 @@ class SourceIntelResult:
     #: signed-into-allocator). Empty before axis-7 ships; populated
     #: from engine/coccinelle/source_intel/hazards/ output.
     hazards: Tuple[HazardEvidence, ...] = ()
+
+    #: Axis 2 sub-class: warn-class call sites (informational).
+    warns: Tuple[WarnEvidence, ...] = ()
+
+    #: Axis 2 sub-class: explicit NULL-check sites (informational).
+    null_guards: Tuple[NullGuardEvidence, ...] = ()
 
     #: Axis 6 consumer: build-hardening flags observed in the target's
     #: build configuration. Populated from core.build.build_flags when
@@ -507,6 +549,8 @@ def analyze(
     capability_observations: List[CapabilityEvidence] = []
     checked_allocation_observations: List[CheckedAllocationEvidence] = []
     hazard_observations: List[HazardEvidence] = []
+    warn_observations: List[WarnEvidence] = []
+    null_guard_observations: List[NullGuardEvidence] = []
 
     # spatch invocation per axis. ``no_includes=True`` matches the
     # existing PR-3 scan + PR-4 prereqs untrusted-target posture;
@@ -543,6 +587,12 @@ def analyze(
                 )
                 hazard_observations.extend(
                     _parse_match_to_hazard(match)
+                )
+                warn_observations.extend(
+                    _parse_match_to_warn(match)
+                )
+                null_guard_observations.extend(
+                    _parse_match_to_null_guard(match)
                 )
 
     # Project-specific alias discovery: walk target headers, classify
@@ -581,6 +631,8 @@ def analyze(
         capabilities=tuple(capability_observations),
         checked_allocations=tuple(checked_allocation_observations),
         hazards=tuple(hazard_observations),
+        warns=tuple(warn_observations),
+        null_guards=tuple(null_guard_observations),
         build_flags=extract_flags(target),
     )
 
@@ -817,6 +869,48 @@ def _parse_match_to_capability(match: Any) -> List[CapabilityEvidence]:
         grade=GRADE_SAME_FUNCTION,
         enclosing_function=enclosing_fn,
         conditional_on=cond,
+    )]
+
+
+def _parse_match_to_warn(match: Any) -> List[WarnEvidence]:
+    """Convert a cocci SpatchMatch from warn_class.cocci into a
+    WarnEvidence record. Message: ``warn:<fn>``."""
+    msg = (getattr(match, "message", "") or "").strip()
+    if not msg.startswith("warn:"):
+        return []
+    warn_fn = msg[len("warn:"):].strip()
+    if not warn_fn:
+        return []
+    file_path = getattr(match, "file", "")
+    line_no = int(getattr(match, "line", 0))
+    enclosing_fn = (
+        _enclosing_function(file_path, line_no) if file_path else None
+    )
+    return [WarnEvidence(
+        warn_fn=warn_fn,
+        location=(file_path, line_no),
+        enclosing_function=enclosing_fn,
+    )]
+
+
+def _parse_match_to_null_guard(match: Any) -> List[NullGuardEvidence]:
+    """Convert a cocci SpatchMatch from null_guards.cocci into a
+    NullGuardEvidence record. Message: ``null_guard:<kind>``."""
+    msg = (getattr(match, "message", "") or "").strip()
+    if not msg.startswith("null_guard:"):
+        return []
+    kind = msg[len("null_guard:"):].strip()
+    if not kind:
+        return []
+    file_path = getattr(match, "file", "")
+    line_no = int(getattr(match, "line", 0))
+    enclosing_fn = (
+        _enclosing_function(file_path, line_no) if file_path else None
+    )
+    return [NullGuardEvidence(
+        kind=kind,
+        location=(file_path, line_no),
+        enclosing_function=enclosing_fn,
     )]
 
 
