@@ -77,6 +77,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -93,6 +94,28 @@ except ImportError:
 # Spring Boot's deepest parent + BOM chain is ~5. 10 leaves
 # headroom while terminating pathological chains.
 _MAX_DEPTH = 10
+
+
+# Maven coordinate field character set. Per the Maven specification,
+# groupId / artifactId / version are restricted to alphanumeric,
+# dot, dash, underscore. Real coords also use ``+`` (build metadata
+# in semver-style versions). We reject anything outside this set
+# before forwarding to ``MavenRegistry.get_pom`` — a hostile POM
+# that declares ``<groupId>../../../evil</groupId>`` would otherwise
+# inject path-traversal segments into the registry URL.
+_MAVEN_COORD_RE = re.compile(r"^[A-Za-z0-9._+\-]+$")
+
+
+def _valid_coord(group: Optional[str], artifact: Optional[str],
+                 version: Optional[str]) -> bool:
+    """True iff all three coord components are well-formed Maven
+    identifiers. Anything outside ``[A-Za-z0-9._+-]`` is rejected
+    so we never construct a URL from attacker-controlled
+    path-traversal characters."""
+    for part in (group, artifact, version):
+        if not part or not _MAVEN_COORD_RE.match(part):
+            return False
+    return True
 
 
 # The merged inheritance view assembled for a single POM.
@@ -154,14 +177,30 @@ class PomInheritanceResolver:
         *,
         offline: bool = False,
         max_depth: int = _MAX_DEPTH,
+        scan_root: Optional[Path] = None,
     ) -> None:
         """``maven_client`` is a :class:`MavenRegistry`-shaped object
         with a ``get_pom(coord, version) -> Optional[dict]`` method.
         ``None`` (or ``offline=True``) disables network fetches —
-        only local-parent resolution runs."""
+        only local-parent resolution runs.
+
+        ``scan_root``: when set, local-parent file reads are confined
+        to this directory (after symlink resolution). A
+        ``<relativePath>`` that escapes ``scan_root`` is refused —
+        same defence Maven's own resolver employs against
+        ``<relativePath>/etc/passwd``-style hostile references.
+        When ``None``, no containment check runs — appropriate for
+        tests but production pipelines must pass the scan target.
+        """
         self._client = maven_client
         self._offline = offline or maven_client is None
         self._max_depth = max_depth
+        # Resolve symlinks now so subsequent containment checks
+        # compare like-for-like. ``None`` means "no containment
+        # check" — the pipeline always passes a real root.
+        self._scan_root = (
+            scan_root.resolve() if scan_root is not None else None
+        )
         # ``(group, artifact, version) → InheritanceView``. Caches the
         # MERGED view for a coordinate, so reuse across many child
         # POMs that share a parent is O(1).
@@ -232,6 +271,17 @@ class PomInheritanceResolver:
         version = _text(parent_el, "version")
         if not (group and artifact and version):
             return
+        # SECURITY: reject malformed coord characters before they
+        # land in cache/visited keys. A crafted coord with
+        # path-traversal chars wouldn't cause direct harm here
+        # (it's just a dict key) but it MAY hit the network paths
+        # later via cache miss; reject upfront for consistency.
+        if not _valid_coord(group, artifact, version):
+            logger.debug(
+                "sca.pom_inheritance: refusing malformed parent "
+                "coord on walk: (%r, %r, %r)", group, artifact, version,
+            )
+            return
 
         coord_key = (group, artifact, version)
         if coord_key in visited:
@@ -296,7 +346,31 @@ class PomInheritanceResolver:
         # "no local parent, only network" — respect it.
         if rel == "":
             return None
+        # SECURITY: reject absolute paths in relativePath. Maven
+        # convention is strictly relative; an absolute path here is
+        # either a misconfigured POM or a hostile reference trying
+        # to read an arbitrary file via the inheritance walk.
+        if Path(rel).is_absolute():
+            logger.debug(
+                "sca.pom_inheritance: refusing absolute relativePath "
+                "%r on %s", rel, child_path,
+            )
+            return None
         candidate = (child_path.parent / rel).resolve()
+        # SECURITY: confine to scan_root. ``Path.resolve()`` follows
+        # symlinks, so this also catches the "symlink in default
+        # ../pom.xml points outside the project" case — the
+        # resolved real path won't be under scan_root.
+        if self._scan_root is not None:
+            try:
+                candidate.relative_to(self._scan_root)
+            except ValueError:
+                logger.debug(
+                    "sca.pom_inheritance: refusing relativePath %r "
+                    "→ %s; escapes scan_root %s",
+                    rel, candidate, self._scan_root,
+                )
+                return None
         # If the path is a directory, append pom.xml (Maven also
         # accepts that shape).
         if candidate.is_dir():
@@ -344,7 +418,15 @@ class PomInheritanceResolver:
         group = _text(parent_el, "groupId")
         artifact = _text(parent_el, "artifactId")
         version = _text(parent_el, "version")
-        if not (group and artifact and version):
+        # SECURITY: validate the coordinate fields before forwarding
+        # to the registry. A hostile POM declaring
+        # ``<groupId>../../../evil</groupId>`` would otherwise inject
+        # path-traversal segments into the Maven Central URL.
+        if not _valid_coord(group, artifact, version):
+            logger.debug(
+                "sca.pom_inheritance: refusing malformed parent "
+                "coord (%r, %r, %r)", group, artifact, version,
+            )
             return None
         coord = f"{group}:{artifact}"
         try:
@@ -393,7 +475,18 @@ class PomInheritanceResolver:
         rel = _text(parent_el, "relativePath") or "../pom.xml"
         if rel == "":
             return None
+        # Mirror the security checks in ``_read_local_parent``: any
+        # path we'd refuse to READ from must also not be returned as
+        # the next-level child path (else a hostile chain at depth N
+        # could escape via a relativePath that depth N+1 walks).
+        if Path(rel).is_absolute():
+            return None
         candidate = (child_path.parent / rel).resolve()
+        if self._scan_root is not None:
+            try:
+                candidate.relative_to(self._scan_root)
+            except ValueError:
+                return None
         if candidate.is_dir():
             candidate = candidate / "pom.xml"
         if candidate.is_file():
@@ -464,6 +557,15 @@ class PomInheritanceResolver:
         coordinate directly. Used by the BOM walker which doesn't
         have a <parent> element to read from."""
         if self._offline or self._client is None:
+            return None
+        # Same coord validation as the parent-element path. BOM
+        # imports declare their coord in dependencyManagement
+        # entries — same threat shape, same defence.
+        if not _valid_coord(group, artifact, version):
+            logger.debug(
+                "sca.pom_inheritance: refusing malformed BOM coord "
+                "(%r, %r, %r)", group, artifact, version,
+            )
             return None
         coord = f"{group}:{artifact}"
         try:

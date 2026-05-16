@@ -668,6 +668,190 @@ def test_explicit_version_wins_over_inherited(tmp_path: Path):
     assert j.version == "4.12"
 
 
+def test_absolute_relativepath_refused(tmp_path: Path):
+    """A POM declaring ``<relativePath>/etc/passwd</relativePath>``
+    must be refused — Maven convention is strictly relative, and an
+    absolute path here is either misconfiguration or hostile."""
+    # Plant a "shared" parent at /tmp somewhere that the probe could
+    # in principle escape to.
+    outside = tmp_path / "actual_outside" / "pom.xml"
+    outside.parent.mkdir(parents=True, exist_ok=True)
+    outside.write_text('''<project>
+  <groupId>com.example</groupId>
+  <artifactId>shared</artifactId>
+  <version>1.0</version>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>ESCAPED</groupId>
+        <artifactId>via-abs-path</artifactId>
+        <version>9.9.9</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+</project>''', encoding="utf-8")
+    child = _write(tmp_path / "project", "pom.xml", f'''\
+<project>
+  <parent>
+    <groupId>com.example</groupId>
+    <artifactId>shared</artifactId>
+    <version>1.0</version>
+    <relativePath>{outside}</relativePath>
+  </parent>
+  <artifactId>app</artifactId>
+  <dependencies>
+    <dependency>
+      <groupId>ESCAPED</groupId>
+      <artifactId>via-abs-path</artifactId>
+    </dependency>
+  </dependencies>
+</project>''')
+    deps = _parse_with_resolver(child, client=None)
+    esc = next((d for d in deps if d.name == "ESCAPED:via-abs-path"), None)
+    assert esc is not None
+    assert esc.version is None, (
+        f"absolute relativePath escaped — got {esc.version}"
+    )
+
+
+def test_scan_root_confines_resolution(tmp_path: Path):
+    """Even a SYMLINK at the conventional ``../pom.xml`` location
+    pointing outside ``scan_root`` is refused — the resolved real
+    path lands outside the confinement zone."""
+    import os
+    outside_pom = tmp_path / "outside" / "pom.xml"
+    outside_pom.parent.mkdir(parents=True, exist_ok=True)
+    outside_pom.write_text('''<project>
+  <groupId>com.example</groupId>
+  <artifactId>shared</artifactId>
+  <version>1.0</version>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>FROM_OUTSIDE</groupId>
+        <artifactId>sneaky</artifactId>
+        <version>9.9.9</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+</project>''', encoding="utf-8")
+    project = tmp_path / "project"
+    project.mkdir(parents=True)
+    # Symlink at ../pom.xml (the default relativePath) → outside.
+    symlink = project.parent / "pom.xml"
+    os.symlink(outside_pom, symlink)
+    child = project / "pom.xml"
+    child.write_text('''<project>
+  <parent>
+    <groupId>com.example</groupId>
+    <artifactId>shared</artifactId>
+    <version>1.0</version>
+  </parent>
+  <artifactId>app</artifactId>
+  <dependencies>
+    <dependency>
+      <groupId>FROM_OUTSIDE</groupId>
+      <artifactId>sneaky</artifactId>
+    </dependency>
+  </dependencies>
+</project>''', encoding="utf-8")
+    # scan_root = the project dir; symlink target escapes it
+    resolver = pom_inheritance.PomInheritanceResolver(
+        None, offline=True, scan_root=project,
+    )
+    pom_inheritance.set_inheritance_resolver(resolver)
+    try:
+        deps = pom_parser.parse(child)
+    finally:
+        pom_inheritance.set_inheritance_resolver(None)
+    s = next((d for d in deps if d.name == "FROM_OUTSIDE:sneaky"), None)
+    assert s is not None
+    assert s.version is None, (
+        f"symlink escape via scan_root miss — got {s.version}"
+    )
+
+
+def test_malformed_coord_does_not_reach_network(tmp_path: Path):
+    """Coord fields with path-traversal chars must NOT be forwarded
+    to the registry — they'd inject into the URL."""
+    class _ProbeClient:
+        def __init__(self):
+            self.fetched = []
+
+        def get_pom(self, coord, version):
+            self.fetched.append((coord, version))
+            return None
+
+    client = _ProbeClient()
+    child = _write(tmp_path, "pom.xml", '''\
+<project>
+  <parent>
+    <groupId>../../../evil</groupId>
+    <artifactId>../../also-evil</artifactId>
+    <version>1.0</version>
+    <relativePath></relativePath>
+  </parent>
+  <artifactId>app</artifactId>
+</project>''')
+    resolver = pom_inheritance.PomInheritanceResolver(
+        client, offline=False, scan_root=tmp_path,
+    )
+    pom_inheritance.set_inheritance_resolver(resolver)
+    try:
+        pom_parser.parse(child)
+    finally:
+        pom_inheritance.set_inheritance_resolver(None)
+    assert client.fetched == [], (
+        f"malformed coord reached client: {client.fetched}"
+    )
+
+
+def test_xxe_in_parent_pom_blocked(tmp_path: Path):
+    """A parent POM with a DOCTYPE / entity payload must be
+    rejected by defusedxml (billion-laughs defence)."""
+    _write(tmp_path, "pom.xml", '''<?xml version="1.0"?>
+<!DOCTYPE project [
+  <!ENTITY lol "lol">
+  <!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;">
+]>
+<project>
+  <groupId>com.example</groupId>
+  <artifactId>shared</artifactId>
+  <version>1.0</version>
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>SHOULD_NOT_LAND</groupId>
+        <artifactId>via-xxe</artifactId>
+        <version>9.9.9</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+</project>''')
+    child = _write(tmp_path, "service/pom.xml", '''\
+<project>
+  <parent>
+    <groupId>com.example</groupId>
+    <artifactId>shared</artifactId>
+    <version>1.0</version>
+  </parent>
+  <artifactId>app</artifactId>
+  <dependencies>
+    <dependency>
+      <groupId>SHOULD_NOT_LAND</groupId>
+      <artifactId>via-xxe</artifactId>
+    </dependency>
+  </dependencies>
+</project>''')
+    # Don't crash, don't merge depMgmt from the rejected parent
+    deps = _parse_with_resolver(child, client=None)
+    s = next((d for d in deps if d.name == "SHOULD_NOT_LAND:via-xxe"), None)
+    assert s is not None
+    assert s.version is None, (
+        f"depMgmt merged from XXE-rejected parent — got {s.version}"
+    )
+
+
 def test_relativepath_empty_skips_local_and_uses_network(tmp_path: Path):
     """``<relativePath></relativePath>`` is Maven's convention for
     'no local parent, only network'. Resolver respects it."""

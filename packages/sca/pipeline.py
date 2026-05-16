@@ -257,6 +257,10 @@ def run_sca(
     _pom_inh.set_inheritance_resolver(
         _pom_inh.PomInheritanceResolver(
             _maven_for_pom, offline=options.offline,
+            # Confine local-parent file reads to the scan target.
+            # Defends against hostile ``<relativePath>/etc/passwd``
+            # and symlink-into-outside-the-project attacks.
+            scan_root=target,
         ),
     )
     try:
