@@ -49,17 +49,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from core.function_taxonomy import (
-    ALLOC_FUNCS,
-    EXEC_FUNCS,
-    FORMAT_STRING_FUNCS,
-    INTEGER_PARSE_FUNCS,
-    MEMORY_COPY_FUNCS,
-    NETWORK_INGEST_FUNCS,
-    PARSER_FUNCS,
-    SCAN_FAMILY_FUNCS,
-    STRING_OVERFLOW_FUNCS,
-    TOCTOU_FUNCS,
+from packages.binary_analysis.fingerprint import (
+    BUCKETS as _BUCKETS,
+    HIGH_SEVERITY_BUCKETS as _HIGH_SEVERITY_BUCKETS,
+    bucket_imports as _bucket_imports_shared,
 )
 from ..models import (
     Confidence,
@@ -70,25 +63,6 @@ from ..models import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-# Per-bucket capability classification — the keys are the severity
-# escalator. ``exec`` and ``network`` trigger ``high``; the rest
-# trigger ``medium``.
-_BUCKETS: Tuple[Tuple[str, frozenset], ...] = (
-    ("exec", EXEC_FUNCS),
-    ("network", NETWORK_INGEST_FUNCS),
-    ("string_overflow", STRING_OVERFLOW_FUNCS),
-    ("scan", SCAN_FAMILY_FUNCS),
-    ("memory_copy", MEMORY_COPY_FUNCS),
-    ("format_string", FORMAT_STRING_FUNCS),
-    ("alloc", ALLOC_FUNCS),
-    ("parser", PARSER_FUNCS),
-    ("integer_parse", INTEGER_PARSE_FUNCS),
-    ("toctou", TOCTOU_FUNCS),
-)
-
-_HIGH_SEVERITY_BUCKETS: frozenset = frozenset({"exec", "network"})
 
 
 @dataclass
@@ -131,23 +105,11 @@ class CapabilityDelta:
         return sorted(self.new_dangerous_imports.keys())
 
 
-def _bucket_imports(
-    imports: Set[str],
-) -> Dict[str, Set[str]]:
-    """Classify a binary's import set by capability bucket.
-
-    Returns a dict of ``{bucket_name: {fn1, fn2, ...}}`` for each
-    bucket that has at least one matching import. Imports outside
-    the high-CVE-density taxonomy buckets are intentionally
-    dropped — ubiquitous functions like ``malloc`` / ``printf`` /
-    ``read`` aren't signal.
-    """
-    out: Dict[str, Set[str]] = {}
-    for bucket_name, fn_set in _BUCKETS:
-        matched = imports & fn_set
-        if matched:
-            out[bucket_name] = matched
-    return out
+# Bucket classification hoisted to packages.binary_analysis.
+# fingerprint so the SCA detector and the standalone fingerprint
+# primitive share one source of truth. Local alias kept so the
+# existing tests + diff logic don't need rewiring.
+_bucket_imports = _bucket_imports_shared
 
 
 def diff_binary_capabilities(
