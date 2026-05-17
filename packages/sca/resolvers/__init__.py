@@ -217,8 +217,23 @@ def _run(
 
     Routes through :func:`core.sandbox.run` with:
 
-      - ``target=cwd`` and ``output=cwd`` so Landlock engages with the
-        project dir as the legitimate read+write surface.
+      - ``target=cwd``: Landlock engages with the project dir as a
+        readable surface so the resolver can read manifests +
+        lockfiles.
+      - ``output=<tempdir>``: the sandbox's writable surface is a
+        per-call tempdir, NOT the project dir. The resolver's venv
+        lives under ``/tmp`` anyway (see ``pip.py:_venv_dir``); the
+        project dir doesn't need to be writable. Routing ``output=``
+        to a tempdir avoids two collateral effects of using ``cwd``:
+          * The sandbox creates ``.home/`` inside ``output=`` for the
+            fake-HOME (see ``core/sandbox/context.py:_fake_home``).
+            With ``output=cwd``, that pollutes the operator's
+            project dir — bug observed during compromise-detection
+            harness work, May 2026.
+          * Any resolver bug that tried to write to cwd (lockfile
+            mutation, log file dump) would silently land there.
+            Routing writes through a tempdir means such bugs surface
+            as EACCES at write time instead of polluting the tree.
       - ``use_egress_proxy=True`` + ``proxy_hosts``: HTTPS_PROXY is
         injected into the child env and TCP is pinned (Landlock) to
         the in-process proxy's loopback port. Any attempt to reach a
@@ -227,7 +242,7 @@ def _run(
       - ``restrict_reads=True`` + ``fake_home=True``: $HOME is hidden
         so a resolver vuln (or a missed ``--ignore-scripts``) cannot
         read ~/.ssh / ~/.aws / ~/.config/raptor; the tool's own
-        caches are written to a fake $HOME under /tmp.
+        caches are written to the tempdir-located fake $HOME.
 
     Never raises on non-zero exit — the caller decides what's a
     failure. Does propagate :class:`subprocess.TimeoutExpired` from
@@ -235,31 +250,33 @@ def _run(
     ``dry_run`` catches it and translates to a ``ResolverResult`` with
     a "timed out after Xs" error.
     """
+    import tempfile
     from core.sandbox.context import run as sandbox_run
 
-    # When the call is local-only (e.g. ``python -m venv``,
-    # ``ensurepip``), pass ``block_network=True`` and skip the proxy
-    # entirely — the sandbox refuses ``use_egress_proxy=True`` with an
-    # empty allowlist, and we don't want network anyway.
-    sandbox_kwargs = {
-        "cwd": str(cwd),
-        "capture_output": True,
-        "text": True,
-        "timeout": timeout,
-        "env": env,
-        "target": str(cwd),
-        "output": str(cwd),
-        "restrict_reads": True,
-        "fake_home": True,
-        "caller_label": "sca-resolver",
-    }
-    if block_network or not proxy_hosts:
-        sandbox_kwargs["block_network"] = True
-    else:
-        sandbox_kwargs["use_egress_proxy"] = True
-        sandbox_kwargs["proxy_hosts"] = list(proxy_hosts)
+    with tempfile.TemporaryDirectory(prefix="raptor-sca-resolver-") as out_dir:
+        # When the call is local-only (e.g. ``python -m venv``,
+        # ``ensurepip``), pass ``block_network=True`` and skip the proxy
+        # entirely — the sandbox refuses ``use_egress_proxy=True`` with an
+        # empty allowlist, and we don't want network anyway.
+        sandbox_kwargs = {
+            "cwd": str(cwd),
+            "capture_output": True,
+            "text": True,
+            "timeout": timeout,
+            "env": env,
+            "target": str(cwd),
+            "output": out_dir,
+            "restrict_reads": True,
+            "fake_home": True,
+            "caller_label": "sca-resolver",
+        }
+        if block_network or not proxy_hosts:
+            sandbox_kwargs["block_network"] = True
+        else:
+            sandbox_kwargs["use_egress_proxy"] = True
+            sandbox_kwargs["proxy_hosts"] = list(proxy_hosts)
 
-    return sandbox_run(cmd, **sandbox_kwargs)
+        return sandbox_run(cmd, **sandbox_kwargs)
 
 
 # ---------------------------------------------------------------------------

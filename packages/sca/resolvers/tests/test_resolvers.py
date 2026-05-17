@@ -590,7 +590,12 @@ def test_npm_run_routes_through_sandbox_with_proxy(monkeypatch, tmp_path):
     assert kwargs["use_egress_proxy"] is True
     assert kwargs["proxy_hosts"] == ["registry.npmjs.org"]
     assert kwargs["target"] == str(tmp_path)
-    assert kwargs["output"] == str(tmp_path)
+    # output= is a per-call tempdir, NOT the project dir. Asserts the
+    # fix for the .home/ contamination bug: routing the sandbox's
+    # writable surface to a tempdir avoids polluting the operator's
+    # project tree with the fake-HOME directory hierarchy.
+    assert kwargs["output"] != str(tmp_path)
+    assert "raptor-sca-resolver-" in kwargs["output"]
     assert kwargs["restrict_reads"] is True
     assert kwargs["fake_home"] is True
     assert kwargs["caller_label"] == "sca-resolver"
