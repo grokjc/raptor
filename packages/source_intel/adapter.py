@@ -262,6 +262,9 @@ class SourceIntelValidator:
         if _fortify_source_blocks_finding(finding, result):
             return ValidatorVerdict.NOT_EXPLOITABLE
 
+        if _stack_protector_suppresses_finding(finding, result):
+            return ValidatorVerdict.NOT_EXPLOITABLE
+
         if _downstream_check_suppresses_finding(finding):
             return ValidatorVerdict.NOT_EXPLOITABLE
 
@@ -640,17 +643,41 @@ def _has_interprocedural_check(
         r"\bif\s*\([^)]*\b" + re.escape(var_name) + r"\b"
     )
     early_exit = re.compile(r"\b(?:return\b|continue\b|break\b|goto\b)")
+    # Two-line "separate err var" pattern:
+    #   err = <call>(<...var...>);
+    #   if (err) <early-exit>;
+    # The if-cond contains `err`, not `var`, so the var_in_if
+    # regex misses. Catch this shape by scanning for an assignment
+    # whose RHS call references `var`, then checking subsequent
+    # lines for `if (<assigned-id>) <exit>`.
+    call_with_var = re.compile(
+        r"^\s*([A-Za-z_]\w*)\s*=\s*\w+\s*\([^)]*\b"
+        + re.escape(var_name) + r"\b"
+    )
 
     # Lines are 0-indexed in the array; alloc_line/sink_line are 1-indexed.
     start_idx = alloc_line  # first line AFTER the alloc
     end_idx = min(sink_line - 1, len(lines))
     for i in range(start_idx, end_idx):
-        if not var_in_if.search(lines[i]):
-            continue
-        # Found an if (... var ...) — look for early-exit within 2 lines.
-        for j in range(i, min(i + 3, len(lines))):
-            if early_exit.search(lines[j]):
-                return True
+        if var_in_if.search(lines[i]):
+            # Found an if (... var ...) — look for early-exit within 2 lines.
+            for j in range(i, min(i + 3, len(lines))):
+                if early_exit.search(lines[j]):
+                    return True
+        m = call_with_var.search(lines[i])
+        if m:
+            assigned = m.group(1)
+            if_with_assigned = re.compile(
+                r"\bif\s*\([^)]*\b" + re.escape(assigned) + r"\b"
+            )
+            # Look for `if (assigned ...)` within next 5 lines,
+            # then early-exit within 3 lines after that.
+            for j in range(i + 1, min(i + 6, len(lines))):
+                if not if_with_assigned.search(lines[j]):
+                    continue
+                for k in range(j, min(j + 3, len(lines))):
+                    if early_exit.search(lines[k]):
+                        return True
     return False
 
 
@@ -1617,4 +1644,76 @@ def _double_free_supports_finding(
                 continue
             if abs(df_line - target_line) <= 3:
                 return True
+    return False
+
+
+# =====================================================================
+# Axis 6 consumer — stack_protector
+# =====================================================================
+
+
+def _stack_protector_suppresses_finding(
+    finding: Finding,
+    result: SourceIntelResult,
+) -> bool:
+    """Return True iff `-fstack-protector-{strong,all,explicit}` is
+    active AND the finding is a stack-buffer-write class. Stack
+    canaries don't prevent the bug — they convert code-execution
+    primitives to abort()/SIGABRT, reducing the verdict from
+    EXPLOITABLE to DoS-only.
+
+    Tight scope:
+      * stack_protector_level in {"strong", "all", "explicit"}
+      * rule_id starts with `cpp/unbounded-write` or `cpp/uncontrolled-`
+      * sink snippet names a fixed-size stack buffer (heuristic:
+        contains `[<digit>]` array-size pattern in source line)
+
+    The fixed-size check avoids over-suppressing on heap writes
+    (malloc'd dst — stack canary doesn't apply). Sloppy heuristic;
+    looks for `buf[<digit>]` or `[<digit>]` in the sink snippet OR
+    one line above. Real CFG would do better; this is good enough
+    for the kernel-buffer cases.
+
+    NOT applicable to:
+      * cpp/null-dereference (canary doesn't address null deref)
+      * heap-buffer-write (canary is stack-only)
+      * info-leak (canary doesn't prevent reads)
+    """
+    bf = result.build_flags
+    if bf is None:
+        return False
+    if bf.stack_protector_level not in ("strong", "all", "explicit"):
+        return False
+    rid = finding.rule_id or ""
+    if not rid.startswith((
+        "cpp/unbounded-write", "c/unbounded-write",
+        "cpp/uncontrolled-", "c/uncontrolled-",
+    )):
+        return False
+
+    # Heuristic: sink snippet (or its surrounding lines) declares a
+    # fixed-size stack array. Pattern: `<type> <ident>[<digit-or-const>];`
+    # in the sink-line ±5 line window.
+    sink_path = finding.sink.file_path or ""
+    sink_line = finding.sink.line or 0
+    if not sink_path or not sink_line:
+        return False
+    sink_path_abs = sink_path
+    if not Path(sink_path).is_absolute():
+        sink_path_abs = str((_DEFAULT_REPO_ROOT / sink_path).resolve())
+    try:
+        with open(sink_path_abs, "r", errors="replace") as f:
+            lines = f.readlines()
+    except OSError:
+        return False
+    # Search window: 10 lines back from sink (the buffer declaration
+    # is typically near the top of the function).
+    start = max(0, sink_line - 11)
+    end = min(sink_line, len(lines))
+    fixed_array_re = re.compile(
+        r"\b[A-Za-z_][A-Za-z_0-9]*\s+[A-Za-z_][A-Za-z_0-9]*\s*\[\s*\d+\s*\]"
+    )
+    for i in range(start, end):
+        if fixed_array_re.search(lines[i]):
+            return True
     return False

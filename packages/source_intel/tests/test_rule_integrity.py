@@ -34,6 +34,7 @@ EXPECTED_RULES = {
     "attrs": {
         "attr_access.cocci",
         "attr_alloc_size.cocci",
+        "attr_counted_by.cocci",
         "attr_malloc.cocci",
         "attr_no_stack_protector.cocci",
         "attr_nonnull.cocci",
@@ -44,6 +45,7 @@ EXPECTED_RULES = {
     "hazards": {
         "deprecated_functions.cocci",
         "signed_alloc.cocci",
+        "type_confusion_cast.cocci",
     },
     "privilege": {
         "capability_check.cocci",
@@ -52,6 +54,7 @@ EXPECTED_RULES = {
     },
     "proximity": {
         "abort_proximate.cocci",
+        "lock_pairs.cocci",
         "null_guards.cocci",
         "warn_class.cocci",
     },
