@@ -155,8 +155,11 @@ def test_alias_scan_finds_kernel_must_check(tmp_path):
     assert len(observations) == 1
     assert observations[0].match_source == "known_alias"
     assert observations[0].raw_match == "__must_check"
-    # Function-name attribution is best-effort — empty per docstring.
-    assert observations[0].function_name == ""
+    # Phase B post-E2E: function-name extractor (post-fix #2) binds
+    # the alias to the nearest non-decoration, non-uppercase
+    # `<name>(` token. Was empty in the original ship; now extracts
+    # `validate` from `static __must_check int validate(int x)`.
+    assert observations[0].function_name == "validate"
 
 
 def test_alias_scan_finds_cpp_nodiscard(tmp_path):

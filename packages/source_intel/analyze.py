@@ -628,7 +628,7 @@ def _has_c_cpp_source(target: Path, max_files: int = 200) -> bool:
 def analyze(
     target: Path,
     rules_dir: Optional[Path] = None,
-    timeout_per_rule: int = 60,
+    timeout_per_rule: int = 180,
 ) -> SourceIntelResult:
     """Run shipped source_intel cocci rules against ``target``.
 
@@ -1404,6 +1404,16 @@ _FUNC_DEF_RE = re.compile(
     r"^\s*(?:[A-Za-z_][A-Za-z0-9_]*\s+)*([A-Za-z_][A-Za-z0-9_]*)\s*\([^;{]*?\)\s*\{?",
 )
 
+# Cheap-match prefix used by the multi-line walker — does the line
+# START like a function-definition opener (`[typespecs] name(`)? If
+# so, the walker forward-joins lines until the paren balances and
+# re-tests against the full ``_FUNC_DEF_RE``. The prefix regex
+# deliberately doesn't require closing `)` — multi-line decls have
+# it on a later line.
+_FUNC_DEF_PREFIX_RE = re.compile(
+    r"^\s*(?:[A-Za-z_][A-Za-z0-9_]*\s+)+[A-Za-z_][A-Za-z0-9_]*\s*\(",
+)
+
 #: C keywords that look like function names to the naive regex above.
 #: Without filtering, `if (cond) { ... }` is mis-classified as a
 #: function definition named "if". Required-type-prefix check would
@@ -1414,22 +1424,32 @@ _C_KEYWORDS: FrozenSet[str] = frozenset({
     "if", "else", "while", "for", "switch", "case", "do", "return",
     "goto", "break", "continue", "sizeof", "typeof", "static_assert",
     "_Static_assert", "__builtin_expect", "likely", "unlikely",
+    # Preprocessor pseudo-functions that look like calls but aren't.
+    "defined",
 })
 
 
 def _enclosing_function(file_path: str, line: int) -> Optional[str]:
     """Best-effort: find the C function definition enclosing ``line``.
 
-    Implementation: scan backward from ``line``, find the most recent
-    line that looks like a function definition opener (identifier
-    followed by parameter list, no semicolon at end). Returns the
-    function name or None when ambiguous.
+    Algorithm:
+      1. Walk backward from ``line``. Skip preprocessor lines,
+         comment-only lines, and lines whose stripped form ends in
+         ``;`` (declarations).
+      2. For each candidate that looks like the START of a function
+         opener (matches the loose ``_FUNC_DEF_PREFIX_RE`` —
+         ``[typespecs] name(``), forward-join subsequent lines until
+         the paren count balances. If the balanced statement then
+         matches the full ``_FUNC_DEF_RE`` (``name(args)[{``) and the
+         name isn't a C control keyword, return it.
+      3. Multi-line definitions like
+         ``static CURLcode do_sendmsg(\\n    struct Curl_cfilter *cf,\\n    ...)``
+         are matched once paren balance is reached on a later line.
 
-    NOT a C parser. Misses: K&R-style decls, function-pointer typedefs,
-    macros that expand to function-like things. Good enough for the
-    common case (kernel + curl follow standard ANSI C function decl
-    style); ambiguous cases return None which the aggregator handles
-    by leaving the abort un-attributed.
+    NOT a full C parser — still misses: K&R-style decls,
+    function-pointer typedefs that look like calls. Good enough for
+    the kernel and curl-style ANSI C; ambiguous cases return None
+    which the aggregator handles by leaving the abort un-attributed.
     """
     try:
         with open(file_path, "r", errors="replace") as f:
@@ -1446,26 +1466,107 @@ def _enclosing_function(file_path: str, line: int) -> Optional[str]:
     stop = max(-1, line - 1 - max_walk - 1)
     for i in range(line - 1, stop, -1):
         candidate = lines[i].rstrip("\n")
-        # Skip preprocessor lines, comments, declarations ending with ;
-        if candidate.lstrip().startswith(("#", "//", "/*", "*")):
+        stripped = candidate.lstrip()
+        # Skip preprocessor lines and comment-only lines.
+        if stripped.startswith(("#", "//", "/*", "*")):
             continue
         # Strip trailing comments before checking for `;` — a line
         # `memcpy(buf, src, n);  /* note */` has the `;` mid-string
         # but is NOT a function definition. Without this strip the
         # candidate `endswith(";")` check misses call sites.
-        code_only = re.sub(r"/\*.*$", "", candidate)
-        code_only = re.sub(r"//.*$", "", code_only).rstrip()
+        code_only = _strip_trailing_comments(candidate)
+        # Lines ending in `;` are declarations or statements, never
+        # function-definition openers. Skip outright.
         if code_only.endswith(";"):
             continue
-        m = _FUNC_DEF_RE.match(candidate)
-        if m:
-            name = m.group(1)
-            # Reject C keywords that look like function names —
-            # `if (cond) { ... }` regex-matches as "function `if`".
-            if name in _C_KEYWORDS:
-                continue
-            return name
+        # Quick prefix test: does this line LOOK like the start of a
+        # function opener (`[type...] name(`)? Cheap reject before
+        # doing the multi-line paren-balance walk.
+        if not _FUNC_DEF_PREFIX_RE.match(candidate):
+            continue
+
+        # Build the balanced statement by joining forward lines until
+        # the open-paren count reaches zero. Bounded to 50 forward
+        # lines so a pathological run-on doesn't burn time.
+        joined, paren_terminator_line = _join_until_paren_balanced(
+            lines, start=i, max_forward=50,
+        )
+        if joined is None:
+            continue
+        # After balancing, the statement must not be a declaration
+        # (semicolon after the closing paren).
+        joined_no_comments = _strip_trailing_comments(joined)
+        # Find content after the matching close paren: must be either
+        # empty / whitespace / `{` (definition body opener). A `;`
+        # there means it's a function declaration / prototype, not a
+        # definition — skip and keep walking back.
+        m = _FUNC_DEF_RE.match(joined_no_comments)
+        if not m:
+            continue
+        # Reject C keywords that look like function names —
+        # `if (cond) { ... }` regex-matches as "function `if`".
+        name = m.group(1)
+        if name in _C_KEYWORDS:
+            continue
+        # Definitive: walker matched a function-definition opener at
+        # or below ``line``. The body span isn't validated (the
+        # walker doesn't know where the body ends without a real C
+        # parser), so this still over-attributes when ``line`` is
+        # actually below the body's close brace — caller knows this
+        # is best-effort.
+        return name
     return None
+
+
+def _strip_trailing_comments(s: str) -> str:
+    """Trim ``// …`` and ``/* … */`` trailing comments + whitespace."""
+    s = re.sub(r"/\*.*$", "", s)
+    s = re.sub(r"//.*$", "", s)
+    return s.rstrip()
+
+
+def _join_until_paren_balanced(
+    lines: List[str], *, start: int, max_forward: int,
+) -> Tuple[Optional[str], Optional[int]]:
+    """Concatenate ``lines[start:]`` forward until the open-paren
+    count reaches zero.
+
+    Returns ``(joined_text, terminator_line_index)`` when balanced
+    within ``max_forward`` lines; ``(None, None)`` otherwise. The
+    joined text has newlines collapsed to single spaces AND inline
+    block comments (``/* ... */`` complete on the line) stripped
+    out so downstream regexes see a clean single-line statement.
+
+    Paren counting is naive: literal parens in strings / chars are
+    counted too. For function-definition openers (identifiers +
+    types + ``(...)``) this is fine — the chance of a string
+    literal inside a function prototype is near zero.
+    """
+    depth = 0
+    pieces: List[str] = []
+    for j in range(start, min(len(lines), start + max_forward)):
+        text = lines[j].rstrip("\n")
+        # Strip inline block comments AND line comments; this is the
+        # text we both count parens on AND emit into the joined result
+        # (so downstream comment-stripping doesn't run away on the
+        # now-single-line joined text — see _strip_trailing_comments
+        # which is line-anchored and assumes /* without */ on same
+        # line means comment-to-EOF).
+        text_clean = re.sub(r"/\*.*?\*/", "", text)
+        text_clean = re.sub(r"//.*$", "", text_clean)
+        pieces.append(text_clean)
+        for ch in text_clean:
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+        if depth <= 0 and j > start:
+            return " ".join(p.strip() for p in pieces), j
+        if depth <= 0 and j == start:
+            # Balanced on the same line — caller's existing regex
+            # would handle this; return for uniform treatment.
+            return text_clean, j
+    return None, None
 
 
 def _parse_match_to_attribute(match: Any) -> List[AttributeEvidence]:
@@ -1590,44 +1691,66 @@ def _scan_project_alias_observations(
             text = entry.read_text(errors="replace")
         except OSError:
             continue
+        file_lines = text.split("\n")
         for family, alias_name in alias_pairs:
             # Word-boundary check; substring would risk false positives
             # on prefix-overlap (FOO_CHECK vs MUST_CHECK).
             if not _is_word_present(text, alias_name):
                 continue
-            # First-occurrence line for prompt context.
-            line_no = 0
-            for n, line in enumerate(text.split("\n"), start=1):
-                if _is_word_present(line, alias_name):
-                    line_no = n
-                    break
-            observations.append(AttributeEvidence(
-                kind=family,
-                function_name="",  # see scan_alias_in_file docstring
-                location=(str(entry), line_no),
-                match_source="project_alias",
-                raw_match=alias_name,
-            ))
+            for n, line in enumerate(file_lines, start=1):
+                if not _is_word_present(line, alias_name):
+                    continue
+                # Skip the alias's own #define line.
+                # Skip ALL preprocessor lines — the alias appearing on
+                # a #define / #if line is part of macro plumbing
+                # (definition, conditional gating, or fallback empty
+                # body), never a USE applying to a function.
+                if _PREPROC_LINE_RE.match(line):
+                    continue
+                fn_name = _extract_function_name_near_alias(
+                    file_lines, line_idx_one_based=n,
+                    alias=alias_name,
+                )
+                observations.append(AttributeEvidence(
+                    kind=family,
+                    function_name=fn_name or "",
+                    location=(str(entry), n),
+                    match_source="project_alias",
+                    raw_match=alias_name,
+                ))
     return observations
 
 
 def _is_word_present(text: str, word: str) -> bool:
     """Word-boundary substring check. Avoids false positives where
     one macro name is a prefix of another (e.g. ``CHECK`` matching in
-    ``CHECK_RETURN``)."""
+    ``CHECK_RETURN``).
+
+    Aliases that contain non-word characters (e.g.
+    ``__attribute__((warn_unused_result))``) can't be safely
+    bounded by ``\\b`` — both ends are non-word chars and
+    ``\\b`` requires a word-on-one-side transition. For those,
+    fall back to plain substring containment; prefix-overlap risk
+    is negligible for any alias containing parens.
+    """
+    if not (word[:1].isalnum() or word[:1] == "_") or not (
+        word[-1:].isalnum() or word[-1:] == "_"
+    ):
+        return word in text
     return bool(re.search(r"\b" + re.escape(word) + r"\b", text))
 
 
 def _scan_alias_in_file(path: Path) -> List[AttributeEvidence]:
     """Best-effort: detect WUR alias spellings in a single C/H file.
 
-    One observation per (file, alias_spelling) pair — multiple aliases
-    in the same file produce multiple observations because each may
-    apply to a different function. We can't bind the alias to a function
-    name without parsing the C, which is exactly cocci's job; the
-    alias-scan exists to surface that "this file has hardening intent"
-    even when the cocci rule didn't fire (which it won't for non-literal
-    spellings until per-alias rules ship).
+    One observation per (file, alias_spelling, line) tuple — every
+    occurrence of an alias spelling in the file emits one
+    observation. We attempt best-effort function-name extraction
+    from the local declaration context (see
+    :func:`_extract_function_name_near_alias`); when the alias is
+    on a macro #define line or otherwise not adjacent to a
+    declaration, ``function_name`` stays empty (the consumer
+    renders the file-level observation either way).
     """
     try:
         text = path.read_text(errors="replace")
@@ -1635,19 +1758,126 @@ def _scan_alias_in_file(path: Path) -> List[AttributeEvidence]:
         return []
 
     observations: List[AttributeEvidence] = []
+    file_lines = text.split("\n")
     for spelling in ALL_WUR_ALIASES:
-        if spelling in text:
-            # First occurrence line — for prompt rendering's sake.
-            line_no = 0
-            for n, line in enumerate(text.split("\n"), start=1):
-                if spelling in line:
-                    line_no = n
-                    break
+        if spelling not in text:
+            continue
+        # Every occurrence — multi-attribute headers carry many
+        # decls; one-per-file would conflate them.
+        for n, line in enumerate(file_lines, start=1):
+            if not _is_word_present(line, spelling):
+                continue
+            # Skip the macro definition line itself (e.g.
+            # `#define WARN_UNUSED_RESULT __attribute__(...)`).
+            if _PREPROC_LINE_RE.match(line):
+                continue
+            fn_name = _extract_function_name_near_alias(
+                file_lines, line_idx_one_based=n, alias=spelling,
+            )
             observations.append(AttributeEvidence(
                 kind=KIND_WUR,
-                function_name="",  # see docstring — best-effort gap
-                location=(str(path), line_no),
+                function_name=fn_name or "",
+                location=(str(path), n),
                 match_source="known_alias",
                 raw_match=spelling,
             ))
     return observations
+
+
+# Token-name extractor used when binding a WUR-alias / project-alias
+# observation to its function. Looser than ``_FUNC_DEF_PREFIX_RE`` —
+# we only need ``<name>(`` shape, not a typespec prefix, because the
+# alias scan can land on the same line as the name without the type.
+_FUNC_NAME_CALL_RE = re.compile(
+    r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\("
+)
+
+
+_PREPROC_LINE_RE = re.compile(r"^\s*#")
+
+# Visibility / linkage / calling-convention decoration macros that
+# real codebases sprinkle BEFORE the actual function name. Excluded
+# from the alias-near function-name extractor — they look like
+# function calls (`CURL_EXTERN`, `__declspec`) but aren't.
+_DECORATION_PREFIXES: FrozenSet[str] = frozenset({
+    "CURL_EXTERN", "ALLOC_FUNC",
+    "__declspec", "__attribute__", "__cdecl", "__stdcall",
+    "__fastcall", "__thiscall",
+    "extern", "static", "inline", "_Noreturn",
+})
+
+
+def _extract_function_name_near_alias(
+    file_lines: List[str],
+    *,
+    line_idx_one_based: int,
+    alias: str,
+) -> Optional[str]:
+    """Best-effort: extract the function name a WUR alias applies to.
+
+    Strategy: inspect a small window (1 line before, line itself,
+    2 lines after) of the alias hit. Filter out:
+      * Preprocessor lines (``#define`` / ``#if`` / ``#elif`` etc.)
+        — these are macro plumbing, not function declarations.
+      * Inline block comments and trailing line comments.
+      * The alias spelling itself (so its internal ``(`` doesn't
+        get mis-extracted as a function name).
+      * The universal ``__attribute__((...))`` form.
+
+    Then look for the first ``<name>(`` pattern; reject C keywords,
+    preprocessor pseudo-functions (``defined``), and the alias
+    family identifiers themselves.
+
+    Returns the candidate function name or None when the window
+    contains no recognisable declaration. None cases include:
+      * alias on a #define line (declaration of the macro itself)
+      * alias on a typedef / struct decl
+      * alias inside a comment block
+      * alias in a preprocessor conditional with no nearby decl
+    """
+    n = line_idx_one_based
+    window_lo = max(0, n - 2)  # one line BEFORE (0-indexed)
+    window_hi = min(len(file_lines), n + 2)  # two lines AFTER
+    window = file_lines[window_lo:window_hi]
+    # Drop preprocessor lines so #if defined(...) and #define lines
+    # never feed the name regex.
+    filtered = [
+        ln for ln in window
+        if not _PREPROC_LINE_RE.match(ln)
+    ]
+    joined = " ".join(filtered)
+    cleaned = joined.replace(alias, " ")
+    cleaned = re.sub(r"__attribute__\s*\(\([^)]*\)\)", " ", cleaned)
+    cleaned = re.sub(r"/\*.*?\*/", " ", cleaned)
+    cleaned = re.sub(r"//.*", " ", cleaned)
+
+    # Collect ALL `<name>(` candidates first. We then prefer:
+    #   1. The first non-decoration, non-uppercase-macro name.
+    #   2. Failing that, the last candidate (best guess at the
+    #      actual function name even if it looked macro-ish).
+    candidates: List[str] = []
+    for m in _FUNC_NAME_CALL_RE.finditer(cleaned):
+        name = m.group(1)
+        if name in _C_KEYWORDS:
+            continue
+        if name in ALL_WUR_ALIASES:
+            continue
+        candidates.append(name)
+    if not candidates:
+        return None
+    for name in candidates:
+        if name in _DECORATION_PREFIXES:
+            continue
+        # Reject all-uppercase identifiers — they're almost always
+        # macros in real C code (`CURL_EXTERN`, `EXPORT_SYMBOL`,
+        # `ALLOC_FUNC`). Real function names mix case. False negative:
+        # legitimate all-caps statics like `MAIN` — rare enough to
+        # tolerate. Keep names that start with a single uppercase
+        # letter followed by lowercase (e.g. `Curl_…`).
+        if name.isupper():
+            continue
+        return name
+    # Fall back: every candidate looked macro-ish. Return the last —
+    # in `MACRO MACRO void *real_name(...)` the real name is at the
+    # end. Better than None for the consumer.
+    return candidates[-1]

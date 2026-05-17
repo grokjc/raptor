@@ -42,6 +42,12 @@ from packages.source_intel.analyze import (
     AbortEvidence,
     AllocationEvidence,
     AttributeEvidence,
+    CapabilityEvidence,
+    DoubleFreeEvidence,
+    HazardEvidence,
+    LsmEvidence,
+    NullGuardEvidence,
+    PairedFreeEvidence,
     SourceIntelResult,
 )
 
@@ -226,6 +232,79 @@ def derive_evidence_strings(
     for ae in allocations:
         lines.append(_render_allocation_line(ae, style))
 
+    # Axis-7 hazard evidence (deprecated_func / signed_alloc / type
+    # confusion / unsafe temp). Filter to finding's function when
+    # supplied. Critical for memory-corruption CWEs — strcpy at a
+    # CWE-120 sink line IS direct supporting evidence.
+    hazards = list(result.hazards)
+    if finding_function:
+        hazards = [
+            h for h in hazards
+            if h.enclosing_function in (finding_function, None)
+        ]
+    for h in hazards:
+        lines.append(_render_hazard_line(h, style))
+
+    # Axis-3 paired-free evidence — INFORMATIONAL for memory-leak
+    # findings. When an alloc IS paired with a free in-function the
+    # leak claim is suspect (cocci can't prove all-paths-free, only
+    # "some-path-free"). Filter to finding's function.
+    paired_frees = list(result.paired_frees)
+    if finding_function:
+        paired_frees = [
+            p for p in paired_frees
+            if p.enclosing_function in (finding_function, None)
+        ]
+    for p in paired_frees:
+        lines.append(_render_paired_free_line(p, style))
+
+    # Axis-3 double-free evidence. Direct EXPLOITABLE-supporting
+    # evidence for cpp/double-free findings. Filter to finding's
+    # function.
+    double_frees = list(result.double_frees)
+    if finding_function:
+        double_frees = [
+            d for d in double_frees
+            if d.enclosing_function in (finding_function, None)
+        ]
+    for d in double_frees:
+        lines.append(_render_double_free_line(d, style))
+
+    # Axis-4 capability evidence — privilege gating at sink. When
+    # a capable(CAP_PRIV) check dominates the sink, the attacker
+    # already holds that privilege; weighs the verdict accordingly.
+    capabilities = list(result.capabilities)
+    if finding_function:
+        capabilities = [
+            c for c in capabilities
+            if c.enclosing_function in (finding_function, None)
+        ]
+    for c in capabilities:
+        lines.append(_render_capability_line(c, style))
+
+    # Axis-4 LSM hook evidence — Linux Security Module hooks gate
+    # the sink path. Same severity caveat as capabilities.
+    lsm_hooks = list(result.lsm_hooks)
+    if finding_function:
+        lsm_hooks = [
+            l for l in lsm_hooks
+            if l.enclosing_function in (finding_function, None)
+        ]
+    for l in lsm_hooks:
+        lines.append(_render_lsm_line(l, style))
+
+    # Axis-2 null-guard evidence — null check on pointer before
+    # use. Lowers severity of cpp/null-dereference findings when
+    # a guard dominates the sink line.
+    null_guards = list(result.null_guards)
+    if finding_function:
+        null_guards = [
+            ng for ng in null_guards
+            if ng.enclosing_function in (finding_function, None)
+        ]
+    for ng in null_guards:
+        lines.append(_render_null_guard_line(ng, style))
+
     # Axis-6 sanitizer context. Surfaced once per finding (target-wide,
     # not per-call-site) when build_flags carries observed sanitizers.
     # The LLM weighs this in two opposing directions per consumer:
@@ -292,6 +371,167 @@ def _render_allocation_line(ae: AllocationEvidence, style: str) -> str:
         f"{fn_text} stores into {field_text} with NO subsequent NULL "
         f"check on that location. Allocation failure → NULL stored → "
         f"downstream deref crashes (CWE-476).{caveat}"
+    )
+
+
+def _render_hazard_line(h: HazardEvidence, style: str) -> str:
+    """Render one axis-7 hazard observation."""
+    fn_text = (
+        f"function `{h.enclosing_function}`"
+        if h.enclosing_function
+        else f"in {h.location[0]} near line {h.location[1]}"
+    )
+    if style == "stage_d":
+        prefix = "Hazardous call site — unsafe-by-design API"
+    elif style == "exploit_plan":
+        prefix = "Primitive — unsafe API at sink"
+    else:
+        prefix = "Variant hint — hazardous API"
+    explainer = {
+        "deprecated_func": (
+            "doesn't carry its own bounds; caller must have "
+            "established length safety. Direct supporting evidence "
+            "for cpp/unbounded-write."
+        ),
+        "signed_alloc": (
+            "signed multiplication into alloc size — classic "
+            "CWE-190 → CWE-122 source. Supports an uncontrolled-"
+            "allocation-size finding."
+        ),
+        "type_confusion_cast": (
+            "casts between incompatible pointer types without "
+            "validation — supports type-confusion variants of "
+            "CWE-704."
+        ),
+        "unsafe_temp": (
+            "predictable filename + race window between name and "
+            "open — supports CWE-377 / CWE-379."
+        ),
+    }.get(h.kind, "")
+    return (
+        f"{prefix}: `{h.detail}` ({h.kind}) at "
+        f"{h.location[0]}:{h.location[1]} {fn_text}. {explainer}"
+    )
+
+
+def _render_paired_free_line(p: PairedFreeEvidence, style: str) -> str:
+    """Render one axis-3 paired-alloc/free observation."""
+    fn_text = (
+        f"function `{p.enclosing_function}`"
+        if p.enclosing_function
+        else f"in {p.location[0]} near line {p.location[1]}"
+    )
+    if style == "stage_d":
+        prefix = "Memory-leak suspect signal — alloc paired with free"
+    elif style == "exploit_plan":
+        prefix = "Constraint — free pairing observed"
+    else:
+        prefix = "Variant hint — paired alloc/free"
+    return (
+        f"{prefix}: `{p.allocator}` at "
+        f"{p.location[0]}:{p.location[1]} {fn_text} IS paired with a "
+        f"`{p.free_fn}` call in the same function. Cocci can prove "
+        f"\"some-path-free\", not \"all-paths-free\" — error paths "
+        f"may still leak — but a cpp/memory-leak claim on this "
+        f"alloc-site is suspect."
+    )
+
+
+def _render_double_free_line(d: DoubleFreeEvidence, style: str) -> str:
+    """Render one axis-3 double-free observation."""
+    fn_text = (
+        f"function `{d.enclosing_function}`"
+        if d.enclosing_function
+        else f"in {d.location[0]} near line {d.location[1]}"
+    )
+    if style == "stage_d":
+        prefix = "Primitive — double-free observed"
+    elif style == "exploit_plan":
+        prefix = "Primitive — double-free at sink"
+    else:
+        prefix = "Variant hint — double-free shape"
+    return (
+        f"{prefix}: `{d.free_fn}` called twice on the same expression "
+        f"with no intervening reassignment to NULL or a new "
+        f"allocation. First free at "
+        f"{d.location[0]}:{d.location[1]} {fn_text}. Direct "
+        f"supporting evidence for cpp/double-free (CWE-415)."
+    )
+
+
+def _render_capability_line(c: CapabilityEvidence, style: str) -> str:
+    """Render one axis-4 capability-check observation."""
+    fn_text = (
+        f"function `{c.enclosing_function}`"
+        if c.enclosing_function
+        else f"in {c.location[0]} near line {c.location[1]}"
+    )
+    grade_phrase = {
+        GRADE_DOMINATES: "DOMINATES the function body (depth-1, no early exit precedes)",
+        GRADE_SAME_PATH: "on a nested control-flow path (depth>1, inside if/loop/switch)",
+        GRADE_SAME_FUNCTION: "shares the function with the sink",
+    }.get(c.grade, c.grade)
+    if style == "stage_d":
+        prefix = "Privilege gating — capability check near sink"
+    elif style == "exploit_plan":
+        prefix = "Constraint — capability required to reach sink"
+    else:
+        prefix = "Variant hint — capability check"
+    return (
+        f"{prefix}: `{c.cap_function}(...)` at "
+        f"{c.location[0]}:{c.location[1]} {fn_text} — {grade_phrase}. "
+        f"Attacker must already hold the checked capability before "
+        f"the sink is reachable; for root-equivalent caps the bug "
+        f"may not be a meaningful escalation."
+    )
+
+
+def _render_lsm_line(l: LsmEvidence, style: str) -> str:
+    """Render one axis-4 LSM hook observation."""
+    fn_text = (
+        f"function `{l.enclosing_function}`"
+        if l.enclosing_function
+        else f"in {l.location[0]} near line {l.location[1]}"
+    )
+    if style == "stage_d":
+        prefix = "Privilege gating — LSM hook near sink"
+    elif style == "exploit_plan":
+        prefix = "Constraint — LSM hook on path to sink"
+    else:
+        prefix = "Variant hint — LSM hook"
+    return (
+        f"{prefix}: `{l.hook_name}` at "
+        f"{l.location[0]}:{l.location[1]} {fn_text}. Linux Security "
+        f"Module checks the operation; deployments with active LSM "
+        f"(SELinux/AppArmor/Smack) may block exploitation even when "
+        f"the C-level bug exists."
+    )
+
+
+def _render_null_guard_line(ng: NullGuardEvidence, style: str) -> str:
+    """Render one axis-2 null-guard observation."""
+    fn_text = (
+        f"function `{ng.enclosing_function}`"
+        if ng.enclosing_function
+        else f"in {ng.location[0]} near line {ng.location[1]}"
+    )
+    if style == "stage_d":
+        prefix = "Defensive check — null guard observed"
+    elif style == "exploit_plan":
+        prefix = "Constraint — null check precedes sink"
+    else:
+        prefix = "Variant hint — null guard"
+    kind_phrase = {
+        "bang": "`if (!e)`",
+        "eq_null": "`if (e == NULL)`",
+        "is_err": "`IS_ERR(e)` / `IS_ERR_OR_NULL(e)`",
+    }.get(ng.kind, ng.kind)
+    return (
+        f"{prefix}: {kind_phrase}-shape null check at "
+        f"{ng.location[0]}:{ng.location[1]} {fn_text}. Reduces "
+        f"likelihood of cpp/null-dereference reaching runtime — "
+        f"but doesn't prove ALL null paths are guarded (cocci "
+        f"only sees the matched site)."
     )
 
 
