@@ -84,6 +84,20 @@ _FIXTURE_ALLOWED_FILENAMES: Tuple[str, ...] = (
 )
 _FIXTURE_ALLOWED_SUFFIXES: Tuple[str, ...] = (
     ".csproj", ".vbproj", ".fsproj",  # .NET project files
+    # Consumer source — small files we author to exercise the
+    # reachability layer. The allowlist is policy: source we write
+    # is in scope; ``node_modules/`` etc. (installed deps that COULD
+    # contain malicious package bytes) are still blocked via the
+    # directory blocklist below.
+    ".js", ".ts", ".mjs", ".cjs",     # JavaScript / TypeScript
+    ".py",                              # Python
+    ".java", ".kt", ".scala",          # JVM family
+    ".go",                              # Go
+    ".rs",                              # Rust
+    ".rb",                              # Ruby
+    ".cs", ".vb", ".fs",                # .NET source
+    ".php",                             # PHP
+    ".c", ".cc", ".cpp", ".h", ".hpp",  # C / C++ (consumer code)
 )
 
 # vuln_type prefix mapping — the corpus uses short kind names; the
@@ -141,6 +155,12 @@ class ExpectedSignal:
     severity_floor: str = "info"
     require_kev: bool = False
     cve_id: Optional[str] = None
+    reachability: Optional[str] = None
+    # When set, the matched finding's ``sca.reachability.verdict``
+    # must equal this string. Common values: ``imported``,
+    # ``likely_called``, ``not_reachable``. Used by fixtures that
+    # include consumer source code to assert SCA's import-detection
+    # layer flips the verdict correctly.
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ExpectedSignal":
@@ -149,6 +169,7 @@ class ExpectedSignal:
             severity_floor=str(d.get("severity_floor", "info")),
             require_kev=bool(d.get("require_kev", False)),
             cve_id=d.get("cve_id"),
+            reachability=d.get("reachability"),
         )
 
 
@@ -162,6 +183,8 @@ class FixtureResult:
     missed: List[ExpectedSignal] = field(default_factory=list)
     parity_ok: bool = True
     parity_note: str = ""
+    gate_ok: bool = True
+    gate_note: str = ""
     note: str = ""
 
 
@@ -409,6 +432,50 @@ def _parity_check(art: "_ScanArtifacts") -> Tuple[bool, str]:
     return True, ""
 
 
+def _run_gate(
+    fixture_path: Path, *, offline: bool,
+) -> Tuple[Optional[int], str]:
+    """Re-invoke ``raptor-sca`` on a copy of the fixture with the
+    most-permissive gate flags (``--fail-on-* info`` across vuln /
+    supply-chain / hygiene). Returns ``(exit_code, err)``.
+
+    Purpose: prove the CI-gate path end-to-end. Every fixture in
+    the corpus represents a known compromise that fires at least
+    one finding at ``info`` or higher; with the gate set to ``info``
+    on all three axes, exit code MUST be 1. An exit-0 here means
+    either (a) the gate path silently drops findings the scan
+    surfaces (regression), or (b) the gate flag wiring is broken.
+
+    Like ``_run_sca``, copies the fixture to a tempdir first so
+    the source corpus stays pristine.
+    """
+    with tempfile.TemporaryDirectory(prefix="sca-gate-check-") as work_dir:
+        scan_target = Path(work_dir) / "fixture"
+        out_dir = Path(work_dir) / "out"
+        shutil.copytree(fixture_path, scan_target)
+        cmd: List[str] = [
+            sys.executable, "-m", "packages.sca.cli",
+            str(scan_target),
+            "--out", str(out_dir),
+            "--no-progress", "--no-llm",
+            "--fail-on-severity", "info",
+            "--fail-on-supply-chain", "info",
+            "--fail-on-hygiene", "info",
+        ]
+        if offline:
+            cmd.append("--offline")
+        env = os.environ.copy()
+        env["RAPTOR_DIR"] = str(_REPO_ROOT)
+        env["_RAPTOR_TRUSTED"] = "1"
+        try:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=300, env=env,
+            )
+        except subprocess.TimeoutExpired:
+            return None, "raptor-sca gate timed out after 300s"
+        return proc.returncode, ""
+
+
 def _row_matches_expected(
     row: Dict[str, Any], expected: ExpectedSignal,
 ) -> bool:
@@ -435,6 +502,12 @@ def _row_matches_expected(
             row.get("sca", {}).get("advisory", {}).get("id") or ""
         )
         if expected.cve_id not in aliases and expected.cve_id != adv_id:
+            return False
+    if expected.reachability:
+        verdict = (
+            row.get("sca", {}).get("reachability", {}).get("verdict")
+        )
+        if verdict != expected.reachability:
             return False
     return True
 
@@ -474,11 +547,28 @@ def _evaluate_fixture(
         else:
             missed.append(exp)
     parity_ok, parity_note = _parity_check(art)
+    gate_rc, gate_err = _run_gate(fixture_dir / "fixture", offline=offline)
+    if gate_rc is None:
+        gate_ok = False
+        gate_note = gate_err
+    elif gate_rc == 1:
+        gate_ok = True
+        gate_note = ""
+    else:
+        # Exit 0 means the gate didn't trip on a fixture we know has
+        # findings — gate machinery regression. Exit 2 means
+        # invalid args; treat as harness bug and surface.
+        gate_ok = False
+        gate_note = (
+            f"unexpected exit code {gate_rc} from "
+            f"--fail-on-severity info (expected 1)"
+        )
     return FixtureResult(
         name=name, fixture_path=fixture_dir,
         passed=len(missed) == 0,
         expected=expected, matched=matched, missed=missed,
         parity_ok=parity_ok, parity_note=parity_note,
+        gate_ok=gate_ok, gate_note=gate_note,
     )
 
 
@@ -510,6 +600,7 @@ def _format_report(
     for r in results:
         status = "PASS" if r.passed else "FAIL"
         parity_tag = "  parity:ok" if r.parity_ok else "  parity:MISMATCH"
+        gate_tag = "  gate:ok" if r.gate_ok else "  gate:BROKEN"
         suffix = ""
         if r.passed and r.matched:
             suffix = f" ({len(r.matched)}/{len(r.expected)} signals matched)"
@@ -520,16 +611,24 @@ def _format_report(
                 suffix += f" [{r.note[:120]}]"
         if not r.parity_ok and r.parity_note:
             suffix += f" — parity: {r.parity_note}"
-        lines.append(f"  {r.name:<{width}}  {status}{parity_tag}{suffix}")
+        if not r.gate_ok and r.gate_note:
+            suffix += f" — gate: {r.gate_note}"
+        lines.append(
+            f"  {r.name:<{width}}  {status}{parity_tag}{gate_tag}{suffix}"
+        )
     passed = sum(1 for r in results if r.passed)
     parity_ok = sum(1 for r in results if r.parity_ok)
+    gate_ok = sum(1 for r in results if r.gate_ok)
     total = len(results)
     rate = (passed / total * 100) if total else 0
     parity_rate = (parity_ok / total * 100) if total else 0
+    gate_rate = (gate_ok / total * 100) if total else 0
     lines.append("")
     lines.append(f"Catch rate:  {passed}/{total} ({rate:.0f}%)")
     lines.append(f"Parity rate: {parity_ok}/{total} ({parity_rate:.0f}%) — "
                  f"report.md summary counts vs findings.json")
+    lines.append(f"Gate rate:   {gate_ok}/{total} ({gate_rate:.0f}%) — "
+                 f"--fail-on-severity info exits 1 on every fixture")
     return "\n".join(lines)
 
 
@@ -591,7 +690,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         results.append(_evaluate_fixture(fixture_dir, offline=args.offline))
 
     print(_format_report(results, json_out=args.json))
-    return 0 if all(r.passed for r in results) else 1
+    # Exit 1 if any axis failed — catch, parity, or gate. A pure
+    # parity / gate failure without a catch failure is still a
+    # regression worth blocking on.
+    all_ok = all(r.passed and r.parity_ok and r.gate_ok for r in results)
+    return 0 if all_ok else 1
 
 
 if __name__ == "__main__":

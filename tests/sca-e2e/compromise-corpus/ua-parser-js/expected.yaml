@@ -16,6 +16,12 @@
 must_detect:
   - kind: vuln_dep
     severity_floor: high
+    reachability: imported
+    # The fixture includes index.js which require()s ua-parser-js.
+    # SCA's reachability layer must flip the verdict from
+    # not_reachable to imported, otherwise the risk-score path
+    # under-weights this finding and CI gates on severity may
+    # let it slide.
   - kind: sentinel_match
     severity_floor: critical
   - kind: yanked_version

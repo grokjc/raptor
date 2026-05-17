@@ -26,6 +26,11 @@
 must_detect:
   - kind: vuln_dep
     severity_floor: medium
+    reachability: imported
+    # The fixture includes main.py which imports ctx. SCA's Python
+    # reachability layer must flip the verdict from not_reachable
+    # to imported — proves the AST-based import detection
+    # recognises top-level ``import ctx`` of the malicious dep.
   - kind: sentinel_match
     severity_floor: critical
   - kind: typosquat_candidate
