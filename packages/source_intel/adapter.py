@@ -29,7 +29,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Dict, FrozenSet, Optional, Tuple
+from typing import Any, Dict, FrozenSet, Optional, Tuple
 
 from core.dataflow.finding import Finding
 from core.dataflow.validator import ValidatorVerdict
@@ -1290,37 +1290,60 @@ def _hazard_supports_finding(
 # =====================================================================
 
 
+# Default depth limit for the privilege back-walk. 3 hops covers the
+# common kernel call shapes (syscall → ioctl handler → subsystem
+# helper → bug primitive); deeper walks bring diminishing returns and
+# rising risk of over-suppression on dense call-graphs. Cap at 5 in
+# the public API to keep walk cost bounded even with operator override.
+_PRIV_BACK_WALK_DEFAULT_DEPTH = 3
+_PRIV_BACK_WALK_MAX_DEPTH = 5
+
+
 def _privilege_back_walk_suppresses(
     finding: Finding,
     result: SourceIntelResult,
     repo_root: Path,
+    *,
+    max_depth: int = _PRIV_BACK_WALK_DEFAULT_DEPTH,
 ) -> bool:
-    """Return True iff the finding's enclosing function is ONLY
-    reachable via callers that each have a privileged ``capable()``
-    check in their body.
+    """Return True iff every call path reaching the finding's
+    enclosing function (within ``max_depth`` hops) passes through a
+    privileged ``capable()`` check.
 
-    1-hop scope: walks direct callers of the finding's function
-    via PR-4 prereqs; for each caller, checks whether that
-    caller's body contains a `capable(CAP_<PRIVILEGED>)` call
-    (using the same `_PRIVILEGED_CAP_FUNCTIONS` and
-    `_PRIVILEGED_CAP_CONSTANTS` sets as in-function axis-4).
+    Multi-hop scope (PR3 of Phase B): walks the inverted call graph
+    via PR-4 prereqs (``packages.coccinelle.prereqs:function_inventory``);
+    at each hop the caller's body is checked for a
+    ``capable(CAP_<PRIVILEGED>)`` call. A path is "gated" when the
+    walk encounters a privileged capability in some caller along the
+    path before either depth-limit or a leaf is reached.
 
-    Conservative: if PR-4 reports zero callers (finding function
-    is a top-level entry — handled by in-function axis-4), or
-    any direct caller LACKS a privileged gate, this back-walk
-    does NOT suppress. Single ungated path is enough to let the
-    finding through.
+    Suppression requires **every** call path to be gated within
+    ``max_depth``. If any path:
+      * reaches a leaf (caller with no callers — likely an entry
+        point) without seeing a gate, OR
+      * exhausts ``max_depth`` without seeing a gate, OR
+      * contains a caller whose enclosing function cannot be
+        determined,
+    the back-walk returns False (do NOT suppress; at least one
+    unprivileged path exists, or we can't prove otherwise).
+
+    ``max_depth`` is clamped at :data:`_PRIV_BACK_WALK_MAX_DEPTH`
+    to bound walk cost on dense call-graphs.
+
+    Cycle-safe: visited set prevents infinite recursion on mutually-
+    recursive callers.
 
     Limitations:
-      * 1-hop only — doesn't follow chains more than one caller
-        deep. Functions buried 2+ hops below an entry that's
-        gated will still be flagged.
-      * No CFG-aware "call site is downstream of capable()" check
-        — caller HAS capable() somewhere is enough. Could
-        over-suppress if the caller has multiple branches and
-        only one is gated.
+      * No CFG-aware "call site is downstream of capable()" check —
+        caller HAS capable() somewhere in its body is enough. Could
+        over-suppress when the caller has multiple branches and only
+        one is gated. Same limitation as the 1-hop version.
       * No support for indirect calls (function pointers / ops
-        vtables / macro-registered handlers).
+        vtables / macro-registered handlers) — PR-4's
+        ``function_inventory`` cocci doesn't see them.
+      * Cap-set is the conservative root-equivalent set in
+        :data:`_PRIVILEGED_CAP_CONSTANTS`; userspace namespace caps
+        (CAP_NET_ADMIN, CAP_SYS_NICE, …) intentionally don't count.
     """
     rid = finding.rule_id or ""
     if not any(rid.startswith(p) for p in _MEMORY_CORRUPTION_RULE_PREFIXES):
@@ -1355,19 +1378,76 @@ def _privilege_back_walk_suppresses(
 
     callers = facts.callers_of(finding_fn)
     if not callers:
-        # No callers seen — let in-function axis-4 handle this case.
+        # No callers seen — finding function may be a top-level
+        # entry. In-function axis-4 handles entry-level checks.
         return False
 
-    # For each call site, find its enclosing function. If ANY
-    # caller is NOT privileged-gated, return False — at least one
-    # ungated path reaches the finding.
+    effective_depth = max(1, min(max_depth, _PRIV_BACK_WALK_MAX_DEPTH))
+
+    # For each direct call site, find its enclosing function. The
+    # path through that caller is "gated" iff the caller itself has
+    # a privileged cap, OR (recursively) every path to that caller
+    # within remaining depth is gated. If any direct caller's path
+    # isn't gated, return False — at least one ungated path exists.
+    visited = {finding_fn}
     for call_file, call_line in callers:
         caller_fn = _enclosing_function(call_file, call_line)
         if not caller_fn:
             return False
-        if not _function_has_privileged_cap(caller_fn, result):
+        if not _path_is_gated(
+            caller_fn, facts, result,
+            remaining_depth=effective_depth - 1,
+            visited=visited,
+        ):
             return False
+    return True
 
+
+def _path_is_gated(
+    fn_name: str,
+    facts: Any,
+    result: SourceIntelResult,
+    *,
+    remaining_depth: int,
+    visited: FrozenSet[str],
+) -> bool:
+    """Multi-hop helper: True iff every call path reaching ``fn_name``
+    (within ``remaining_depth`` further hops) passes through a
+    privileged capability check.
+
+    Termination cases (visited in order):
+      1. Cycle / already-visited (``fn_name in visited``) → False.
+         Cycles can't be "gated" without an entry — bail.
+      2. ``fn_name`` itself contains a privileged ``capable()`` →
+         True. Gate found, stop expanding this branch.
+      3. Depth exhausted (``remaining_depth == 0``) → False.
+         Could not prove gating within budget; conservative.
+      4. No callers (leaf) → False. ``fn_name`` is an entry point;
+         path is ungated.
+      5. Otherwise: recurse on every direct caller; True iff all
+         caller paths are themselves gated.
+    """
+    if fn_name in visited:
+        return False
+    if _function_has_privileged_cap(fn_name, result):
+        return True
+    if remaining_depth <= 0:
+        return False
+    callers = facts.callers_of(fn_name)
+    if not callers:
+        return False
+    next_visited = visited | {fn_name}
+    from packages.source_intel.analyze import _enclosing_function
+    for call_file, call_line in callers:
+        caller_fn = _enclosing_function(call_file, call_line)
+        if not caller_fn:
+            return False
+        if not _path_is_gated(
+            caller_fn, facts, result,
+            remaining_depth=remaining_depth - 1,
+            visited=next_visited,
+        ):
+            return False
     return True
 
 
