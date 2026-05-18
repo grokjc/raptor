@@ -221,3 +221,93 @@ def test_finding_carries_line_number(tmp_path: Path) -> None:
     _write(tmp_path / "evil.py", "import os\n\n\nC2 = 'http://x.onion/'\n")
     findings = scan_target(tmp_path, [])
     assert findings and findings[0].line == 4
+
+
+# ---------------------------------------------------------------------------
+# Cross-language test-file exclusion (regression: Go *_test.go files
+# were being scanned and producing exfil FPs during the May 2026
+# 200-project sweep on docker-moby)
+# ---------------------------------------------------------------------------
+
+def test_go_test_file_excluded_from_exfil_scan(tmp_path: Path) -> None:
+    """``*_test.go`` files are Go's test convention — must be
+    excluded from the exfil walk same as ``test_*.py``."""
+    _write(
+        tmp_path / "syslog_test.go",
+        "package syslog\n\nconst SyslogURL = \"http://1.2.3.4\"\n",
+    )
+    findings = scan_target(tmp_path, [])
+    assert findings == [], (
+        f"Go test file flagged: {[f.detail for f in findings]}"
+    )
+
+
+def test_ruby_test_and_spec_files_excluded(tmp_path: Path) -> None:
+    """``*_test.rb`` / ``*_spec.rb`` are Ruby's test conventions."""
+    _write(tmp_path / "thing_test.rb", "URL = 'http://1.2.3.4/p'\n")
+    _write(tmp_path / "thing_spec.rb", "URL = 'http://5.6.7.8/p'\n")
+    findings = scan_target(tmp_path, [])
+    assert findings == []
+
+
+def test_java_test_file_excluded(tmp_path: Path) -> None:
+    """``XTest.java`` / ``XTests.java`` / ``XIT.java`` are common
+    JVM test naming conventions (JUnit + IT for integration)."""
+    _write(
+        tmp_path / "FooTest.java",
+        "class FooTest { String u = \"http://1.2.3.4\"; }\n",
+    )
+    findings = scan_target(tmp_path, [])
+    assert findings == []
+
+
+def test_rust_test_file_excluded(tmp_path: Path) -> None:
+    """``*_test.rs`` is Rust's filename convention for module tests
+    (the ``tests/`` dir form was already covered)."""
+    _write(
+        tmp_path / "url_test.rs",
+        "const URL: &str = \"http://1.2.3.4\";\n",
+    )
+    findings = scan_target(tmp_path, [])
+    assert findings == []
+
+
+def test_csharp_test_file_excluded(tmp_path: Path) -> None:
+    """``*Test.cs`` / ``*Tests.cs`` are common .NET test conventions
+    (xUnit / NUnit / MSTest)."""
+    _write(
+        tmp_path / "FooTest.cs",
+        "class FooTest { string url = \"http://1.2.3.4\"; }\n",
+    )
+    _write(
+        tmp_path / "BarTests.cs",
+        "class BarTests { string url = \"http://5.6.7.8\"; }\n",
+    )
+    findings = scan_target(tmp_path, [])
+    assert findings == []
+
+
+def test_php_test_file_excluded(tmp_path: Path) -> None:
+    """``*Test.php`` is PHPUnit's convention."""
+    _write(
+        tmp_path / "FooTest.php",
+        "<?php $url = 'http://1.2.3.4';\n",
+    )
+    findings = scan_target(tmp_path, [])
+    assert findings == []
+
+
+def test_non_test_go_file_still_scanned(tmp_path: Path) -> None:
+    """Sanity: production ``.go`` files (no ``_test.go`` suffix)
+    must still be walked — the exclusion is naming-convention-based,
+    not extension-based. Otherwise the cross-language test-name
+    extension would over-fire and miss real exfil in production
+    code."""
+    _write(
+        tmp_path / "real.go",
+        "package main\nconst URL = \"http://1.2.3.4\"\n",
+    )
+    findings = scan_target(tmp_path, [])
+    assert len(findings) >= 1, (
+        "production .go file should still emit exfil findings"
+    )

@@ -95,3 +95,63 @@ def test_orchestrator_emits_finding(tmp_path: Path) -> None:
     findings = evaluate(tmp_path, _manifests(tmp_path), deps)
     kinds = {f.kind for f in findings}
     assert "typosquat_domain" in kinds
+
+
+# ---------------------------------------------------------------------------
+# Same-registrable-domain skip (in-family variations not typosquats)
+# ---------------------------------------------------------------------------
+
+def test_same_registrable_domain_in_family_not_flagged(tmp_path: Path) -> None:
+    """``registry-2.docker.io`` vs popular ``registry-1.docker.io``
+    is an in-family variation (Docker's own subdomain naming) — not
+    a typosquat. Surfaced as a false positive on the docker-moby
+    project's own API docs during the May 2026 200-project sweep."""
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "src.go").write_text(
+        "const URL = \"https://registry-2.docker.io/v2/\"\n",
+        encoding="utf-8",
+    )
+    out = scan_target(tmp_path, _manifests(tmp_path))
+    in_family = [
+        f for f in out
+        if f.suspect_host == "registry-2.docker.io"
+    ]
+    assert in_family == [], (
+        f"in-family domain flagged as typosquat: {in_family}"
+    )
+
+
+def test_in_family_skip_does_not_mask_real_typosquat(tmp_path: Path) -> None:
+    """The in-family skip applies only when both hosts have >= 3
+    labels AND identical trailing labels. ``gthub.com`` vs
+    ``github.com`` both have 2 labels — must still flag."""
+    (tmp_path / "package.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "src.py").write_text(
+        "URL = 'https://gthub.com/api'\n", encoding="utf-8")
+    out = scan_target(tmp_path, _manifests(tmp_path))
+    matched = [f for f in out if f.suspect_host == "gthub.com"]
+    assert len(matched) == 1
+    assert matched[0].nearest_popular == "github.com"
+
+
+def test_in_family_skip_unit() -> None:
+    """Unit-level coverage of the same-registrable-domain helper
+    so future maintainers can see the rule explicitly."""
+    from packages.sca.supply_chain.typosquat_domain import (
+        _same_registrable_domain,
+    )
+    # In-family: 3+ labels, identical trailing
+    assert _same_registrable_domain(
+        "registry-2.docker.io", "registry-1.docker.io",
+    )
+    assert _same_registrable_domain(
+        "api.shop.example.com", "cdn.shop.example.com",
+    )
+    # Not in-family: only 2 labels
+    assert not _same_registrable_domain("goagle.com", "google.com")
+    # Not in-family: trailing labels differ
+    assert not _same_registrable_domain("evil.com", "evil.io")
+    # Different number of labels — can't safely declare same-owner
+    assert not _same_registrable_domain(
+        "deep.sub.docker.io", "registry-1.docker.io",
+    )

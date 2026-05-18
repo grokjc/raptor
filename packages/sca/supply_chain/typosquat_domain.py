@@ -56,9 +56,14 @@ _URL_RE = re.compile(
     r"https?://(?P<host>[A-Za-z0-9._\-]+)",
 )
 
-_TEST_DIR_NAMES = {
-    "tests", "test", "__tests__", "spec", "specs", "fixtures",
-}
+# Test-path detection is delegated to the shared ``_test_paths``
+# module so this detector picks up Go / Ruby / Java / Rust / C# /
+# PHP test-file naming conventions, not just dir-name conventions.
+# The local set below was retained as a backstop for the
+# ``fixtures`` dir name that isn't in the shared TEST_DIR_NAMES.
+from .._test_paths import TEST_DIR_NAMES as _SHARED_TEST_DIR_NAMES
+_LOCAL_FIXTURE_DIRS = {"specs", "fixtures"}
+_TEST_DIR_NAMES = _SHARED_TEST_DIR_NAMES | _LOCAL_FIXTURE_DIRS
 
 from ..discovery import EXCLUDED_DIR_NAMES
 
@@ -202,9 +207,53 @@ def _nearest_popular(
             continue
         if d == 0:
             continue                    # exact = popular, not a squat
+        if _same_registrable_domain(host, pop):
+            # In-family variation, not a typosquat. ``registry-2.docker.io``
+            # vs ``registry-1.docker.io`` share the ``docker.io``
+            # registrable; the only attacker who can publish on
+            # ``*.docker.io`` is Docker themselves. Documented + observed
+            # FP on the docker-moby project's own API docs (May 2026
+            # sweep).
+            continue
         if best is None or d < best[0]:
             best = (d, pop)
     return best
+
+
+def _same_registrable_domain(a: str, b: str) -> bool:
+    """Heuristic for "same registrable domain" without a publicsuffix
+    list dep. True when both hostnames have >= 3 labels AND their
+    trailing N-1 labels (everything except the leftmost) are
+    identical — i.e. they differ only in the leftmost subdomain
+    label.
+
+    Examples:
+      * ``registry-2.docker.io`` <-> ``registry-1.docker.io`` ->
+        trailing ``docker.io`` matches, 3 labels each -> True
+        (in-family, not a squat).
+      * ``goagle.com`` <-> ``google.com`` -> 2 labels each, fails
+        the >= 3-label gate -> False (real typosquat caught).
+      * ``api.shop.example.com`` <-> ``cdn.shop.example.com`` ->
+        trailing ``shop.example.com`` matches -> True (in-family).
+      * ``evil.com`` <-> ``evil.io`` -> trailing TLDs differ ->
+        False (different domain).
+
+    The >= 3-label gate is the load-bearing guard against false
+    negatives on bare TLD attacks (``goagle.com`` -> ``google.com``).
+    Without publicsuffix data we can't tell ``co.uk`` from ``.com``,
+    so the rule errs toward flagging anything where both sides have
+    only 2 labels.
+    """
+    a_parts = a.split(".")
+    b_parts = b.split(".")
+    if len(a_parts) != len(b_parts):
+        return False
+    if len(a_parts) < 3:
+        # Fewer than 3 labels means trailing-N-1 is just the TLD;
+        # we can't safely declare "same owner" without publicsuffix
+        # data so default to "different".
+        return False
+    return a_parts[1:] == b_parts[1:]
 
 
 def _damerau_levenshtein(a: str, b: str, cap: int) -> int:
@@ -259,7 +308,21 @@ def _walk_sources(target: Path, *, max_depth: int) -> Iterable[Path]:
 
 
 def _is_test_file(path: Path, target: Path) -> bool:
-    rel = path.relative_to(target)
+    """True for files in test-shaped dirs OR with test-shaped filenames.
+
+    Delegates to the shared ``is_test_path`` so we pick up Go's
+    ``*_test.go``, Ruby's ``*_test.rb`` / ``*_spec.rb``, Java's
+    ``*Test.java``, etc — not just dir-name conventions. The
+    ``fixtures/`` and ``specs/`` dir-name backstops live in the
+    local ``_TEST_DIR_NAMES`` extension above.
+    """
+    from .._test_paths import is_test_path
+    if is_test_path(path, target):
+        return True
+    try:
+        rel = path.relative_to(target)
+    except ValueError:
+        rel = path
     return any(p in _TEST_DIR_NAMES for p in rel.parts)
 
 

@@ -34,14 +34,37 @@ from typing import Set
 TEST_DIR_NAMES: Set[str] = {"tests", "test", "__tests__", "spec", "e2e"}
 
 # Test-file naming conventions across the languages /sca handles.
-# Python: test_x.py, x_test.py, x.test.py, x.spec.py
-# JS/TS:  x.test.{js,ts,jsx,tsx,mjs,cjs}, x.spec.{js,ts,jsx,tsx}
+# Cross-ecosystem extension landed after the docker-moby sweep
+# surfaced exfil-detector false positives on `*_test.go` — the
+# original regex covered Python + JS/TS but missed Go / Ruby /
+# Java / Rust / C# / PHP test conventions.
+#
+# Python:  test_x.py, x_test.py, x.test.py, x.spec.py
+# JS/TS:   x.test.{js,ts,jsx,tsx,mjs,cjs},
+#          x.spec.{js,ts,jsx,tsx,mjs,cjs}
+# Go:      x_test.go
+# Ruby:    x_test.rb, x_spec.rb
+# Java/Kt: XTest.{java,kt}, XTests.{java,kt}, XIT.{java,kt}
+#          (Integration Test convention)
+# Rust:    x_test.rs
+# C#/.NET: XTest.cs, XTests.cs
+# PHP:     XTest.php
 _TEST_FILE_RE = re.compile(
     r"^("
     r"test_.*\.py"
     r"|.*_test\.py"
     r"|.*\.test\.(?:py|js|ts|jsx|tsx|mjs|cjs)"
     r"|.*\.spec\.(?:py|js|ts|jsx|tsx|mjs|cjs)"
+    r"|.*_test\.go"
+    r"|.*_test\.rb"
+    r"|.*_spec\.rb"
+    r"|.*Test\.(?:java|kt)"
+    r"|.*Tests\.(?:java|kt)"
+    r"|.*IT\.(?:java|kt)"
+    r"|.*_test\.rs"
+    r"|.*Test\.cs"
+    r"|.*Tests\.cs"
+    r"|.*Test\.php"
     r")$",
 )
 
