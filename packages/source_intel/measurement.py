@@ -20,6 +20,13 @@ Usage:
                       tabular stdout only.
   --target-prefix S   filter corpus entries by filename prefix
                       (e.g. ``source_intel_``).
+  --verdict V         restrict the sample to entries with this
+                      ground-truth verdict (``true_positive`` or
+                      ``false_positive``). Cannot be combined with
+                      ``--stratified``. Use this to probe for
+                      SI-induced false negatives: a TP-only run
+                      where SI flips any entry to
+                      ``not_exploitable`` is a regression.
 
 Environment requirements:
   * Use the same python3 that runs the rest of RAPTOR — it has the
@@ -152,6 +159,7 @@ def _finding_to_dataflow_path(finding: Finding) -> DataflowPath:
 
 def _iter_memory_corruption_corpus(
     *, prefix: Optional[str], count: int, stratified: bool,
+    verdict: Optional[str] = None,
 ) -> List[tuple]:
     """Yield up to ``count`` (finding, label, name) tuples for
     memory-corruption corpus entries matching the optional prefix.
@@ -162,6 +170,12 @@ def _iter_memory_corruption_corpus(
     false_positive dead_code). Source_intel evidence is hypothesised
     to help LLM avoid false positives most — a TP-only sample would
     miss that effect entirely.
+
+    When ``verdict`` is set, restrict the candidate pool to entries
+    whose ground-truth ``verdict`` matches (``true_positive`` or
+    ``false_positive``). Mutually exclusive with ``stratified`` —
+    the caller is asking for an explicitly skewed sample, usually
+    to probe for SI-induced false negatives on TP-only entries.
     """
     candidates: List[tuple] = []
     for fp in sorted(_CORPUS_DIR.glob("*.json")):
@@ -181,6 +195,8 @@ def _iter_memory_corruption_corpus(
         try:
             label = GroundTruth.from_json(label_path.read_text())
         except Exception:
+            continue
+        if verdict and label.verdict != verdict:
             continue
         candidates.append((finding, label, fp.name))
 
@@ -252,11 +268,22 @@ def main() -> int:
              "so the FP cases — where source_intel evidence is most "
              "likely to help — are represented",
     )
+    parser.add_argument(
+        "--verdict", choices=("true_positive", "false_positive"),
+        default=None,
+        help="restrict sample to entries with this ground-truth "
+             "verdict. Use --verdict true_positive to probe for "
+             "SI-induced false negatives (any TP→not_exploitable "
+             "flip is a regression). Cannot combine with --stratified.",
+    )
     args = parser.parse_args()
+
+    if args.verdict and args.stratified:
+        parser.error("--verdict and --stratified are mutually exclusive")
 
     rows = _iter_memory_corruption_corpus(
         prefix=args.target_prefix, count=args.count,
-        stratified=args.stratified,
+        stratified=args.stratified, verdict=args.verdict,
     )
     if not rows:
         sys.stderr.write("no memory-corruption corpus entries matched\n")
