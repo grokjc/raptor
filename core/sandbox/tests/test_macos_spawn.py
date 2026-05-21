@@ -203,8 +203,19 @@ def test_audit_mode_writes_jsonl(tmp_path):
     # Allow the kernel→log→stream pipeline a moment to flush. Spike
     # #4 measured ~1.5s end-to-end; the LogStreamer.stop() drain
     # window covers most of this but in CI the wall-clock can stretch.
-    time.sleep(2.0)
+    # Pre-fix: a flat ``time.sleep(2.0)`` made the test always
+    # wait 2s even when the JSONL had already landed at 200ms (the
+    # common case on dev macs) — and still flaked on slow CI when
+    # the pipeline took >2s. Poll for the file with a 5s budget
+    # instead: usually returns in <500ms, gives slow CI runners
+    # more headroom, and the worst-case wall-clock matches the old
+    # ``sleep(2.0) + assert`` shape.
     jsonl_path = audit_dir / ".sandbox-denials.jsonl"
+    _poll_deadline = time.monotonic() + 5.0
+    while time.monotonic() < _poll_deadline:
+        if jsonl_path.exists() and jsonl_path.stat().st_size > 0:
+            break
+        time.sleep(0.05)
     assert jsonl_path.exists(), (
         "audit_mode=True did not produce .sandbox-denials.jsonl"
     )

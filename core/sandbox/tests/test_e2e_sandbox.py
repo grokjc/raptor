@@ -41,7 +41,19 @@ class TestE2ENetworkBlocking(unittest.TestCase):
             ["wget", "-q", "-O", "/dev/null", "http://1.1.1.1", "--timeout=2"],
             block_network=True, capture_output=True, text=True, timeout=10,
         )
+        # Strict assertion shape: a network-block test is supposed to
+        # observe wget's "could not resolve" / "connection refused"
+        # path (exit code 4 / 6 / 7 depending on wget build), NOT
+        # arbitrary nonzero. Pre-fix ``assertNotEqual(rc, 0)`` would
+        # pass on a sandbox bug that segfaulted wget or made it
+        # ENOENT — both are nonzero but neither proves network was
+        # blocked. We accept 1-127 as "network-error-ish" (rules out
+        # signal-kill and segfault which would be 128+) plus the
+        # wget-specific codes operators see on a real block.
         self.assertNotEqual(result.returncode, 0)
+        self.assertLess(result.returncode, 128,
+            f"wget returncode={result.returncode} looks like a "
+            f"signal-kill or segfault, not a network block")
 
     def test_curl_blocked(self):
         """curl inside sandbox fails with network error."""
@@ -52,7 +64,12 @@ class TestE2ENetworkBlocking(unittest.TestCase):
             ["curl", "-s", "--connect-timeout", "2", "http://1.1.1.1"],
             block_network=True, capture_output=True, text=True, timeout=10,
         )
+        # Same strict shape as test_wget_blocked above — curl exits
+        # 6 / 7 / 28 on the realistic block paths, all < 128.
         self.assertNotEqual(result.returncode, 0)
+        self.assertLess(result.returncode, 128,
+            f"curl returncode={result.returncode} looks like a "
+            f"signal-kill or segfault, not a network block")
 
     def test_python_socket_blocked(self):
         """Python socket inside sandbox fails."""
