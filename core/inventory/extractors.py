@@ -12,7 +12,7 @@ import re
 import logging
 import warnings
 from dataclasses import dataclass, field, asdict
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -724,6 +724,16 @@ except ImportError:
     _TS_AVAILABLE = False
 
 
+# Per-language Parser cache. Pre-cache, ``TreeSitterExtractor(lang)``
+# constructed a fresh ``TSParser(ts_language)`` on every instance —
+# which is per-file in ``_extract_with_tree_sitter``. The grammar
+# is immutable across the program's lifetime so a single Parser
+# per language can be reused across every parse. Cache by the
+# language NAME (not Language object identity) because
+# ``_ts_language`` wraps a new Language per call.
+_TS_PARSER_BY_LANG: Dict[str, Any] = {}
+
+
 def _ts_language(lang: str):
     """Load tree-sitter language grammar. Returns None if not installed."""
     try:
@@ -751,6 +761,24 @@ def _ts_language(lang: str):
         return Language(ts.language())
     except ImportError:
         return None
+
+
+def _ts_parser_for(lang: str):
+    """Return a cached ``TSParser`` for ``lang``, or None if the
+    grammar isn't installed. Mirrors ``_get_ts_parser`` in
+    ``core/inventory/call_graph.py`` but keyed by language NAME so
+    repeated ``TreeSitterExtractor(lang)`` constructions across
+    many files share one Parser per grammar.
+    """
+    cached = _TS_PARSER_BY_LANG.get(lang)
+    if cached is not None:
+        return cached
+    ts_lang = _ts_language(lang)
+    if ts_lang is None:
+        return None
+    parser = TSParser(ts_lang)
+    _TS_PARSER_BY_LANG[lang] = parser
+    return parser
 
 
 class TreeSitterExtractor:
@@ -785,10 +813,10 @@ class TreeSitterExtractor:
         self.language = language
         self.func_types = self._FUNC_TYPES.get(language, ())
         self.class_types = self._CLASS_TYPES.get(language, ())
-        ts_lang = _ts_language(language)
-        if not ts_lang:
+        parser = _ts_parser_for(language)
+        if parser is None:
             raise RuntimeError(f"tree-sitter grammar not available for {language}")
-        self.parser = TSParser(ts_lang)
+        self.parser = parser
 
     def extract(self, filepath: str, content: str, _tree=None) -> List[FunctionInfo]:
         if _tree is None:
@@ -1452,9 +1480,8 @@ def count_sloc(content: str, language: str, _tree=None) -> int:
 
     if _TS_AVAILABLE:
         try:
-            ts_lang = _ts_language(language)
-            if ts_lang:
-                parser = TSParser(ts_lang)
+            parser = _ts_parser_for(language)
+            if parser is not None:
                 tree = parser.parse(content.encode())
                 comment_lines = _count_comment_lines_ts(tree.root_node)
                 return max(0, total - blank - comment_lines)
