@@ -40,7 +40,24 @@ logger = get_logger()
 def main() -> None:
     # So much more needed here but this is a start for us. :-)
     ap = argparse.ArgumentParser(
-        description="RAPTOR Fuzzing Mode - Binary fuzzing with LLM analysis"
+        description="RAPTOR Fuzzing Mode - Binary fuzzing with LLM analysis",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+Examples:
+  # One-hour AFL++ fuzz of /usr/bin/foo with the default 10-crash cap:
+  python3 raptor_fuzzing.py --binary /usr/bin/foo --duration 3600
+
+  # Autonomous run with explicit goal + memory persistence:
+  python3 raptor_fuzzing.py --binary ./target --autonomous \\
+      --goal 'find heap overflow' --memory-file mem.json
+
+  # Force the orchestrator (libFuzzer + telemetry) and stop after planning:
+  python3 raptor_fuzzing.py --binary ./target --orchestrator --plan-only
+
+  # Force the legacy AFL++-only path (e.g. for reproducing pre-orchestrator
+  # behaviour):
+  python3 raptor_fuzzing.py --binary ./target --legacy
+""",
     )
 
     ap.add_argument("--binary", required=True, help="Path to binary to fuzz")
@@ -62,10 +79,15 @@ def main() -> None:
     # New orchestrator-driven path: capability detection, libFuzzer support,
     # binary_understand via radare2, live telemetry. Default on macOS where
     # AFL++ has shmem issues; can be forced or disabled with these flags.
-    ap.add_argument("--orchestrator", action="store_true",
+    # ``--orchestrator`` and ``--legacy`` are mutually exclusive — passing
+    # both at once previously silently let ``--legacy`` win (since the path
+    # selection branch checked ``args.legacy`` first), which was confusing
+    # for operators who set both in environments / CI matrices.
+    path_group = ap.add_mutually_exclusive_group()
+    path_group.add_argument("--orchestrator", action="store_true",
                     help="Force the new orchestrator pipeline (libFuzzer + AFL++ "
                          "with target detection, capability checks, telemetry)")
-    ap.add_argument("--legacy", action="store_true",
+    path_group.add_argument("--legacy", action="store_true",
                     help="Force the legacy AFL++-only fuzzing path")
     ap.add_argument("--plan-only", action="store_true",
                     help="With --orchestrator, print the plan and exit without running")

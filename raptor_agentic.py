@@ -1166,6 +1166,23 @@ Examples:
     run_semgrep = not args.codeql_only
     run_codeql = (args.codeql or args.codeql_only) and not args.no_codeql
 
+    # Defensive guard for the "no scanners enabled" case. The
+    # mutex group on ``--codeql / --codeql-only / --no-codeql``
+    # makes this structurally unreachable today (you can't pass
+    # both ``--codeql-only`` and ``--no-codeql`` simultaneously),
+    # but if either resolution rule above ever shifts — or a
+    # caller mutates ``args`` between argparse and here — we don't
+    # want the pipeline silently walking to completion with
+    # zero findings and reporting "clean". Bail loudly instead.
+    if not (run_semgrep or run_codeql):
+        print(
+            "\n✗ Both Semgrep and CodeQL are disabled — nothing to scan.\n"
+            "  Re-run without --codeql-only / --no-codeql, or pass only one "
+            "of those flags.",
+            file=sys.stderr,
+        )
+        return 2
+
     semgrep_cmd = None
     codeql_cmd = None
     semgrep_proc = None
