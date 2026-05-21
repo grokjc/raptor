@@ -64,6 +64,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Set, Tuple, Union
@@ -816,8 +817,17 @@ class _AdjacencyIndex:
 # (insertion order; ``dict`` preserves it). 64 inventories is a
 # generous ceiling — typical workflows have at most one "active"
 # inventory plus the occasional historical comparison.
+#
+# Concurrency: ``_INDEX_CACHE_LOCK`` guards all reads + writes.
+# Reachability lookups fan out from /agentic, /validate, and SCA
+# reachability worker pools — concurrent first-time queries on
+# different inventories would otherwise race the eviction sequence
+# (``len > _CACHE_MAX_ENTRIES`` check then ``next(iter(...))``
+# then ``pop``), and dict iteration is not safe across concurrent
+# mutation.
 _INDEX_CACHE: Dict[int, Tuple[Dict[str, Any], "_AdjacencyIndex"]] = {}
 _CACHE_MAX_ENTRIES = 64
+_INDEX_CACHE_LOCK = threading.Lock()
 
 
 def _get_or_build_index(
@@ -833,15 +843,16 @@ def _get_or_build_index(
     nodes / edges exist.
     """
     inv_id = id(inventory)
-    cached = _INDEX_CACHE.get(inv_id)
-    if cached is not None:
-        cached_inv, cached_idx = cached
-        # Identity check: id() reuse can't happen while the cache
-        # holds the dict, but a paranoid check costs nothing.
-        if cached_inv is inventory:
-            return cached_idx
-        # Stale slot — collision after eviction. Drop and rebuild.
-        _INDEX_CACHE.pop(inv_id, None)
+    with _INDEX_CACHE_LOCK:
+        cached = _INDEX_CACHE.get(inv_id)
+        if cached is not None:
+            cached_inv, cached_idx = cached
+            # Identity check: id() reuse can't happen while the cache
+            # holds the dict, but a paranoid check costs nothing.
+            if cached_inv is inventory:
+                return cached_idx
+            # Stale slot — collision after eviction. Drop and rebuild.
+            _INDEX_CACHE.pop(inv_id, None)
 
     # Persistent on-disk cache lookup. Cold-start path otherwise pays
     # the ~300ms build cost every time the operator launches a fresh
@@ -853,10 +864,11 @@ def _get_or_build_index(
     persistent_fp = _reach_cache.compute_fingerprint(inventory)
     persisted = _reach_cache.load_index(persistent_fp)
     if persisted is not None:
-        _INDEX_CACHE[inv_id] = (inventory, persisted)
-        if len(_INDEX_CACHE) > _CACHE_MAX_ENTRIES:
-            oldest = next(iter(_INDEX_CACHE))
-            _INDEX_CACHE.pop(oldest, None)
+        with _INDEX_CACHE_LOCK:
+            _INDEX_CACHE[inv_id] = (inventory, persisted)
+            if len(_INDEX_CACHE) > _CACHE_MAX_ENTRIES:
+                oldest = next(iter(_INDEX_CACHE))
+                _INDEX_CACHE.pop(oldest, None)
         return persisted
 
     idx = _AdjacencyIndex()
@@ -1201,11 +1213,12 @@ def _get_or_build_index(
                         tail, set(),
                     ).add((fn, flag_label))
 
-    _INDEX_CACHE[inv_id] = (inventory, idx)
-    if len(_INDEX_CACHE) > _CACHE_MAX_ENTRIES:
-        # Drop the oldest entry. dict preserves insertion order.
-        oldest = next(iter(_INDEX_CACHE))
-        _INDEX_CACHE.pop(oldest, None)
+    with _INDEX_CACHE_LOCK:
+        _INDEX_CACHE[inv_id] = (inventory, idx)
+        if len(_INDEX_CACHE) > _CACHE_MAX_ENTRIES:
+            # Drop the oldest entry. dict preserves insertion order.
+            oldest = next(iter(_INDEX_CACHE))
+            _INDEX_CACHE.pop(oldest, None)
 
     # Persist for the next process. Best-effort: any IO failure is
     # logged at debug and swallowed (the in-process cache is hot;

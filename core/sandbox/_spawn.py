@@ -252,8 +252,12 @@ def _reap_tracer(tracer_pid: int, timeout_s: float = 2.0) -> None:
     practice — PTRACE_O_EXITKILL has already cleared any orphaned
     tracees, leaving the tracer with nothing to wait for).
     """
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
+    # time.monotonic() — wall clock (time.time()) can jump backward
+    # under NTP/manual `date` adjustments, leaving the deadline never
+    # expiring (or expiring instantly). monotonic is guaranteed
+    # non-decreasing.
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
         try:
             pid, _ = os.waitpid(tracer_pid, os.WNOHANG)
         except ChildProcessError:
@@ -1374,14 +1378,16 @@ def run_sandboxed(
     # .raptor-sbx-* dir under /tmp.
     stdout_buf = b"" if capture_output else None
     stderr_buf = b"" if capture_output else None
-    deadline = time.time() + timeout if timeout else None
+    # time.monotonic() for deadline math — see _reap_tracer() above for the
+    # NTP/wall-clock-jump rationale; same hazard applies here.
+    deadline = time.monotonic() + timeout if timeout else None
     try:
         if capture_output:
             import select
             fds = [out_r, err_r]
             try:
                 while fds:
-                    remaining = (deadline - time.time()) if deadline else None
+                    remaining = (deadline - time.monotonic()) if deadline else None
                     if remaining is not None and remaining <= 0:
                         _kill_and_reap(child_pid)
                         out_str = stdout_buf.decode() if text else stdout_buf
@@ -1415,7 +1421,7 @@ def run_sandboxed(
                     pid_, status = os.waitpid(child_pid, os.WNOHANG)
                     if pid_ != 0:
                         break
-                    if time.time() > deadline:
+                    if time.monotonic() > deadline:
                         _kill_and_reap(child_pid)
                         out_str = (stdout_buf or b"").decode() if text else stdout_buf
                         err_str = (stderr_buf or b"").decode() if text else stderr_buf

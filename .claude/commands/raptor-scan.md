@@ -35,7 +35,7 @@ python3 raptor.py agentic --repo /path/to/code --max-findings 10
 
 Quick Semgrep scan:
 ```bash
-python3 raptor.py scan --repo /path/to/code --policy_groups secrets,owasp
+python3 raptor.py scan --repo /path/to/code --policy-groups secrets,owasp
 ```
 
 ## Important Notes

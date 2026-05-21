@@ -254,3 +254,22 @@ class WebClient:
             'avg_duration': total_duration / total_requests if total_requests > 0 else 0,
             'status_codes': status_codes,
         }
+
+    def close(self) -> None:
+        """Close the underlying ``requests.Session`` and free its
+        connection pool. Idempotent.
+
+        Without this, long-lived scanner processes that instantiate
+        ``WebClient`` per target accumulate one urllib3 connection
+        pool (sockets + SSL contexts) per scan until process exit.
+        """
+        try:
+            self.session.close()
+        except Exception:  # noqa: BLE001 — close() must not raise
+            pass
+
+    def __enter__(self) -> "WebClient":
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()

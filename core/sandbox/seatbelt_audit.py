@@ -353,7 +353,9 @@ class LogStreamer:
 
         target_pid = warm_up.pid
 
-        assert self._proc is not None
+        # Explicit guard rather than assert — survives `python -O`.
+        if self._proc is None:
+            raise RuntimeError("seatbelt_audit: internal invariant — log-stream proc not started")
         if self._proc.stdout is None:
             try:
                 warm_up.wait(timeout=1.0)
@@ -427,7 +429,9 @@ class LogStreamer:
         records to the JSONL. Robust to malformed lines (silently
         skip)."""
         try:
-            assert self._proc is not None
+            # Explicit guard — survives `python -O`.
+            if self._proc is None:
+                raise RuntimeError("seatbelt_audit._read_loop: proc not started")
             for raw_line in self._proc.stdout or ():
                 if self._stopped.is_set():
                     break

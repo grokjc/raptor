@@ -341,7 +341,16 @@ class LLMDispatcher:
             return
         with self._audit_lock:
             try:
-                with open(self._audit_path, "a", encoding="utf-8") as fh:
+                # Open with mode 0o600 — audit log records worker labels,
+                # peer UIDs/PIDs, token-id prefixes, and request paths.
+                # The socket dir is already 0o700 / sockets 0o600; this
+                # closes the symmetric gap.
+                fd = os.open(
+                    self._audit_path,
+                    os.O_WRONLY | os.O_APPEND | os.O_CREAT,
+                    0o600,
+                )
+                with os.fdopen(fd, "a", encoding="utf-8") as fh:
                     fh.write(json.dumps({
                         "ts": ev.ts,
                         "event": ev.event,

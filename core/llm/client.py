@@ -267,6 +267,22 @@ def _get_quota_guidance(model_name: str, provider: str) -> str:
         return "\n→ Rate limit exceeded (provider unspecified)"
 
 
+def _ollama_check_url() -> str:
+    """Return a /api/tags URL the operator can hit to verify Ollama.
+
+    Respects ``RaptorConfig.OLLAMA_HOST``. For remote hosts (anything
+    not localhost / 127.0.0.1) returns the literal ``[REMOTE-OLLAMA]/api/tags``
+    so error messages don't disclose the operator's remote endpoint
+    (CLAUDE.md rule: "never disclose remote OLLAMA server location"),
+    matching the convention already used by ``core.llm.detection``.
+    """
+    from core.config import RaptorConfig
+    host = RaptorConfig.OLLAMA_HOST.rstrip("/")
+    is_local = "localhost" in host or "127.0.0.1" in host
+    base = host if is_local else "[REMOTE-OLLAMA]"
+    return f"{base}/api/tags"
+
+
 class LLMClient:
     """Unified LLM client with multi-provider support and fallback."""
 
@@ -545,22 +561,31 @@ class LLMClient:
                 }, mode=0o600)
             # Reset failure counter on a successful write — recovery
             # from a transient EBUSY shouldn't carry the strike count
-            # forward.
-            self._cache_write_failures = 0
+            # forward. _stats_lock protects against torn writes under
+            # concurrent dispatch from ThreadPoolExecutor.
+            with self._stats_lock:
+                self._cache_write_failures = 0
         except Exception as e:
-            self._cache_write_failures += 1
-            if self._cache_write_failures >= _CACHE_WRITE_FAILURE_THRESHOLD:
-                # Persistent problem (disk full, read-only FS,
-                # permission flip mid-run). Stop spamming the log
-                # and stop attempting subsequent writes.
-                self.config.enable_caching = False
+            # _stats_lock — `+= 1` decomposes to load/incr/store; under
+            # ThreadPoolExecutor dispatch the counter can lose increments
+            # without a lock, and the `enable_caching = False` flip would
+            # be a torn write across threads.
+            with self._stats_lock:
+                self._cache_write_failures += 1
+                failures = self._cache_write_failures
+                if failures >= _CACHE_WRITE_FAILURE_THRESHOLD:
+                    # Persistent problem (disk full, read-only FS,
+                    # permission flip mid-run). Stop spamming the log
+                    # and stop attempting subsequent writes.
+                    self.config.enable_caching = False
+            if failures >= _CACHE_WRITE_FAILURE_THRESHOLD:
                 logger.warning(
-                    f"Cache write error #{self._cache_write_failures}: {e}. "
+                    f"Cache write error #{failures}: {e}. "
                     f"Caching disabled for the remainder of this run."
                 )
             else:
                 logger.warning(
-                    f"Cache write error #{self._cache_write_failures}: {e}"
+                    f"Cache write error #{failures}: {e}"
                 )
             return
         self._maybe_evict_cache()
@@ -657,6 +682,9 @@ class LLMClient:
         from core.json import save_json
         cache_file = self.config.cache_dir / f"structured-{cache_key}.json"
         try:
+            # mode=0o600 — structured LLM responses can contain proprietary
+            # code, scan findings, and vulnerability details. Symmetric with
+            # the unstructured _save_to_cache path at line 539.
             save_json(cache_file, {
                 "result": response.result,
                 "raw": response.raw,
@@ -664,18 +692,22 @@ class LLMClient:
                 "provider": response.provider,
                 "tokens_used": response.tokens_used,
                 "timestamp": time.time(),
-            })
+            }, mode=0o600)
         except Exception as e:
-            self._cache_write_failures += 1
-            if self._cache_write_failures >= _CACHE_WRITE_FAILURE_THRESHOLD:
-                self.config.enable_caching = False
+            # _stats_lock — see _save_to_cache above for the rationale.
+            with self._stats_lock:
+                self._cache_write_failures += 1
+                failures = self._cache_write_failures
+                if failures >= _CACHE_WRITE_FAILURE_THRESHOLD:
+                    self.config.enable_caching = False
+            if failures >= _CACHE_WRITE_FAILURE_THRESHOLD:
                 logger.warning(
-                    f"Structured cache write error #{self._cache_write_failures}: {e}. "
+                    f"Structured cache write error #{failures}: {e}. "
                     f"Caching disabled for the remainder of this run."
                 )
             else:
                 logger.warning(
-                    f"Structured cache write error #{self._cache_write_failures}: {e}"
+                    f"Structured cache write error #{failures}: {e}"
                 )
             return
         self._maybe_evict_cache()
@@ -848,9 +880,11 @@ class LLMClient:
                             logger.info(f"Retrying {model.provider}/{model.model_name} (attempt {attempt + 1}/{self.config.max_retries})")
 
                         provider = self._get_provider(model)
-                        t_start = time.time()
+                        # monotonic() — wall clock can jump under NTP/DST,
+                        # producing negative durations or fake-fast calls.
+                        t_start = time.monotonic()
                         response = provider.generate(prompt, system_prompt, **kwargs)
-                        duration = time.time() - t_start
+                        duration = time.monotonic() - t_start
 
                         # Track cost (thread-safe)
                         with self._stats_lock:
@@ -900,13 +934,13 @@ class LLMClient:
             elif last_error:
                 error_msg += f"\nLast error: {_sanitize_log_message(str(last_error))}"
                 if tier == "local (Ollama)":
-                    error_msg += "\n→ Check Ollama server: http://localhost:11434/api/tags"
+                    error_msg += f"\n→ Check Ollama server: {_ollama_check_url()}"
                 else:
                     error_msg += "\n→ Check API keys and network connectivity"
             else:
                 error_msg += "\nNo enabled models available in this tier."
                 if tier == "local (Ollama)":
-                    error_msg += "\n→ Check Ollama server: http://localhost:11434/api/tags"
+                    error_msg += f"\n→ Check Ollama server: {_ollama_check_url()}"
                 else:
                     error_msg += "\n→ Check API keys and network connectivity"
 
@@ -1058,11 +1092,12 @@ class LLMClient:
                         cost_before = provider.total_cost
                         tokens_before = provider.total_tokens
 
-                        t_start = time.time()
+                        # monotonic() — wall clock can jump under NTP/DST.
+                        t_start = time.monotonic()
                         result_tuple = provider.generate_structured(
                             prompt, schema, system_prompt, **kwargs,
                         )
-                        duration = time.time() - t_start
+                        duration = time.monotonic() - t_start
 
                         # Calculate cost delta
                         cost_delta = provider.total_cost - cost_before
@@ -1125,13 +1160,13 @@ class LLMClient:
             elif last_error:
                 error_msg += f"\nLast error: {_sanitize_log_message(str(last_error))}"
                 if tier == "local (Ollama)":
-                    error_msg += "\n→ Check Ollama server: http://localhost:11434/api/tags"
+                    error_msg += f"\n→ Check Ollama server: {_ollama_check_url()}"
                 else:
                     error_msg += "\n→ Check API keys and network connectivity"
             else:
                 error_msg += "\nNo enabled models available in this tier."
                 if tier == "local (Ollama)":
-                    error_msg += "\n→ Check Ollama server: http://localhost:11434/api/tags"
+                    error_msg += f"\n→ Check Ollama server: {_ollama_check_url()}"
                 else:
                     error_msg += "\n→ Check API keys and network connectivity"
 

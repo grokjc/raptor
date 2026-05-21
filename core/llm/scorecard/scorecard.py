@@ -758,7 +758,10 @@ class ModelScorecard:
                     # file, which stays stable across this rename;
                     # other processes block on the same .lock until
                     # we exit and release.
-                    save_json(self.scorecard.path, self.data)
+                    # mode=0o600 — scorecard captures model-routing info,
+                    # finding IDs, decision classes, and reasoning samples
+                    # that may incidentally include sensitive snippets.
+                    save_json(self.scorecard.path, self.data, mode=0o600)
             finally:
                 if self.lock_fh is not None:
                     try:

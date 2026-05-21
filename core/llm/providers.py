@@ -940,7 +940,15 @@ class OpenAICompatibleProvider(LLMProvider):
             )
 
         except Exception as e:
-            logger.error(f"OpenAI completion failed: {e}")
+            # APIError exception bodies routinely include the request
+            # body (which may carry the prompt) and on 400/401 may echo
+            # Authorization / x-api-key headers in verbose-debug mode.
+            # Also defang ANSI/BIDI/control bytes that could forge log
+            # entries on operator TTYs.
+            from core.security.log_sanitisation import escape_nonprintable
+            from core.security.redaction import redact_secrets
+            logger.error("OpenAI completion failed: %s",
+                         escape_nonprintable(redact_secrets(str(e)))[:1024])
             raise
 
     def generate_structured(self, prompt: str, schema: Dict[str, Any],
@@ -1505,7 +1513,12 @@ class AnthropicProvider(LLMProvider):
             )
 
         except Exception as e:
-            logger.error(f"Anthropic completion failed: {e}")
+            # Same hardening rationale as OpenAICompatibleProvider.generate
+            # above — SDK exception bodies can include prompt + headers.
+            from core.security.log_sanitisation import escape_nonprintable
+            from core.security.redaction import redact_secrets
+            logger.error("Anthropic completion failed: %s",
+                         escape_nonprintable(redact_secrets(str(e)))[:1024])
             raise
 
     def generate_structured(self, prompt: str, schema: Dict[str, Any],
@@ -2064,7 +2077,11 @@ class GeminiProvider(LLMProvider):
             )
 
         except Exception as e:
-            logger.error(f"Gemini completion failed: {e}")
+            # Same hardening rationale as OpenAICompatibleProvider.generate.
+            from core.security.log_sanitisation import escape_nonprintable
+            from core.security.redaction import redact_secrets
+            logger.error("Gemini completion failed: %s",
+                         escape_nonprintable(redact_secrets(str(e)))[:1024])
             raise
 
     def generate_structured(self, prompt: str, schema: Dict[str, Any],
@@ -2343,7 +2360,9 @@ class ClaudeCodeLLMProvider(LLMProvider):
         from core.config import RaptorConfig as _RaptorConfig
         _cc_env = _RaptorConfig.get_safe_env()
 
-        start = _time.time()
+        # monotonic() — wall clock can jump under NTP/DST, producing
+        # negative durations on long CC calls.
+        start = _time.monotonic()
         try:
             proc = subprocess.run(
                 cmd,
@@ -2357,7 +2376,7 @@ class ClaudeCodeLLMProvider(LLMProvider):
             raise RuntimeError(
                 f"claude -p timed out after {self._timeout_s}s"
             ) from e
-        duration = _time.time() - start
+        duration = _time.monotonic() - start
 
         if proc.returncode != 0:
             raise RuntimeError(
@@ -2454,7 +2473,9 @@ class ClaudeCodeLLMProvider(LLMProvider):
         from core.config import RaptorConfig as _RaptorConfig
         _cc_env = _RaptorConfig.get_safe_env()
 
-        start = _time.time()
+        # monotonic() — wall clock can jump under NTP/DST, producing
+        # negative durations on long CC calls.
+        start = _time.monotonic()
         try:
             proc = subprocess.run(
                 cmd,
@@ -2468,7 +2489,7 @@ class ClaudeCodeLLMProvider(LLMProvider):
             raise RuntimeError(
                 f"claude -p timed out after {self._timeout_s}s"
             ) from e
-        duration = _time.time() - start
+        duration = _time.monotonic() - start
 
         if proc.returncode != 0:
             raise RuntimeError(
