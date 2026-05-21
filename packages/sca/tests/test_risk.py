@@ -91,33 +91,42 @@ def test_log4shell_kev_reachable_direct_scores_high():
     )
     score, comps = compute_risk_estimate(f, f.dependency)
     assert 90 <= score <= 100, f"got {score}"
-    # KEV multiplier was 1.20 pre-refit; bumped to 1.32 by the
-    # 2026-05-09 wider-grid refit applied via
-    # libexec/raptor-sca-refit-calibration --apply.
-    assert comps["kev_multiplier"] == 1.32
+    # KEV multiplier history: 1.20 (pre-refit) → 1.32 (2026-05-09
+    # wider-grid refit) → 1.452 (2026-05-21 ρ-aware refit applied
+    # after the CISA Vulnrichment ground-truth integration; the
+    # ρ-aware search lifted KEV_MULT by another 10% because the
+    # SSVC-active multiplier piggybacks on it and needed more
+    # weight to elevate cold-start eco findings).
+    assert comps["kev_multiplier"] == 1.452
 
 
 def test_log4shell_but_not_reachable_drops_to_low():
-    """Same vuln, but high-confidence not_reachable should land WAY
-    below the reachable scenario (under 25). The design's ~29 was an
+    """Same vuln, but high-confidence not_reachable should land
+    well below the reachable scenario. The design's "~29" was an
     approximation; the exact bound depends on whether exposure is
     treated as 0 (not_reachable means no call sites) or 1. We use 0
-    — the natural reading — which gives ~18."""
+    — the natural reading — which gives ~28.5 post the 2026-05-21
+    ρ-aware refit (was ~18 pre-refit; the refit lifted KEV_MULT
+    and reduced REACH_NOT_REACHABLE_MAX_REDUCTION which together
+    raised the floor a not_reachable KEV vuln lands at). The
+    REACHABILITY-RATIO assertion below pins the structural intent
+    (not_reachable scores ≪ reachable) which is robust against
+    further weight drift."""
     f = _finding(
         cvss=10.0, in_kev=True, epss=0.97,
         reach_verdict="not_reachable", reach_conf="high",
         exposure=0.0, depth=0,
     )
     score, _ = compute_risk_estimate(f, f.dependency)
-    assert score < 25, f"got {score}"
+    assert score < 35, f"got {score}"
     # And much lower than the reachable equivalent.
     reachable = _finding(
         cvss=10.0, in_kev=True, epss=0.97,
         reach_verdict="imported", exposure=1.0, depth=0,
     )
     s_reach, _ = compute_risk_estimate(reachable, reachable.dependency)
-    assert score < s_reach * 0.30, (
-        f"not_reachable={score} should be <30% of reachable={s_reach}"
+    assert score < s_reach * 0.40, (
+        f"not_reachable={score} should be <40% of reachable={s_reach}"
     )
 
 
@@ -193,10 +202,13 @@ def test_missing_cvss_uses_neutral_default():
 
 
 def test_missing_epss_uses_neutral_default():
-    """No EPSS → 0.5 default → epss_multiplier = 0.30 + 0.70*0.5 = 0.65."""
+    """No EPSS → 0.5 default → ``epss_multiplier = EPSS_FLOOR +
+    EPSS_RANGE * 0.5``. Constants moved in the 2026-05-21
+    ρ-aware refit (EPSS_FLOOR 0.30 → 0.33, EPSS_RANGE 0.70 → 0.63)
+    so the expected mid-band value is now 0.33 + 0.63*0.5 = 0.645."""
     f = _finding(epss=None)
     _, comps = compute_risk_estimate(f, f.dependency)
-    assert comps["epss_multiplier"] == pytest.approx(0.65, abs=1e-6)
+    assert comps["epss_multiplier"] == pytest.approx(0.645, abs=1e-6)
 
 
 def test_calibration_status_in_components(tmp_path, monkeypatch):

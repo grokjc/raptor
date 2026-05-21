@@ -413,11 +413,15 @@ def test_proposed_values_excludes_unchanged_constants():
 # ---------------------------------------------------------------------------
 
 
-def test_search_metric_returns_top20_ndcg_tuple():
-    """The internal search uses (top_20_precision, ndcg_20).
-    Top-20 dominates; NDCG@20 is the tiebreaker. When all top-20
-    are exploited, precision saturates at 1.0 and NDCG@20 also
-    hits 1.0 — perfect ranking."""
+def test_search_metric_returns_top20_ndcg_rho_tuple():
+    """The internal search uses (top_20_precision, ndcg_20, rho).
+    Top-20 dominates; NDCG@20 is the second tiebreaker; Spearman
+    ρ across the whole corpus is the third. The third dimension
+    was added 2026-05-21 after the Vulnrichment ground-truth
+    integration saturated P20 and NDCG@20 across many candidate
+    weight settings — the ρ tiebreaker lets the search prefer
+    settings that rank exploited findings correctly across the
+    WHOLE corpus, not just within the top 20."""
     from packages.sca.calibration.refit import _search_metric
     samples = []
     for i in range(20):
@@ -434,11 +438,19 @@ def test_search_metric_returns_top20_ndcg_tuple():
              "advisory": {}, "in_kev": False},
             label,
         ))
-    p20, ndcg = _search_metric(samples)
+    p20, ndcg, rho = _search_metric(samples)
     assert p20 == 1.0
     # All top-20 are exploited and there are >20 exploited overall,
     # so DCG@20 == IDCG@20 → NDCG = 1.0.
     assert ndcg == pytest.approx(1.0)
+    # ρ slot is a float. In this synthetic fixture the per-finding
+    # rebuild collapses every finding to the SAME default score
+    # (no CVSS / no signals → cvss_missing default), so
+    # ``_spearman_rho`` returns None (constant-x case) and the
+    # tuple's ρ position falls back to 0.0. The shape assertion
+    # is what this test pins; ρ-sensitivity is exercised by the
+    # ρ-aware-improvement-gate test below.
+    assert isinstance(rho, float)
 
 
 def test_ndcg_distinguishes_orderings_when_precision_ties():

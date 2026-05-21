@@ -49,7 +49,7 @@
       "finding_id": "sca:vuln:npm:karma:3.1.4:GHSA-7x7c-qm48-pq9c",
       "in_kev": false,
       "purl": "pkg:npm/karma@3.1.4",
-      "raptor_risk_estimate": 7.270993535129999,
+      "raptor_risk_estimate": 8.0562126122553,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -114,7 +114,7 @@
       "finding_id": "sca:vuln:npm:karma:3.1.4:GHSA-rc3x-jf5g-xvc5",
       "in_kev": false,
       "purl": "pkg:npm/karma@3.1.4",
-      "raptor_risk_estimate": 4.1107440070125,
+      "raptor_risk_estimate": 4.873302139555125,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -181,7 +181,7 @@
       "finding_id": "sca:vuln:npm:rollup:2.79.1:GHSA-gcx4-mw62-g8wm",
       "in_kev": false,
       "purl": "pkg:npm/rollup@2.79.1",
-      "raptor_risk_estimate": 6.1448959476631995,
+      "raptor_risk_estimate": 8.17920273095383,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -245,7 +245,7 @@
       "finding_id": "sca:vuln:npm:rollup:2.79.1:GHSA-mw96-cpmx-2vgc",
       "in_kev": false,
       "purl": "pkg:npm/rollup@2.79.1",
-      "raptor_risk_estimate": 5.453345647249499,
+      "raptor_risk_estimate": 7.817923933015684,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -314,7 +314,7 @@
       "finding_id": "sca:vuln:npm:brace-expansion:1.1.11:GHSA-f886-m6hf-6m8v",
       "in_kev": false,
       "purl": "pkg:npm/brace-expansion@1.1.11",
-      "raptor_risk_estimate": 4.9216051813499995,
+      "raptor_risk_estimate": 5.840268047893499,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -382,7 +382,7 @@
       "finding_id": "sca:vuln:npm:brace-expansion:1.1.11:GHSA-v6h2-p8h4-qcjw",
       "in_kev": false,
       "purl": "pkg:npm/brace-expansion@1.1.11",
-      "raptor_risk_estimate": 5.414767026122998,
+      "raptor_risk_estimate": 7.77259744176145,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -448,7 +448,7 @@
       "finding_id": "sca:vuln:npm:braces:3.0.2:GHSA-grv7-fg5c-xmjg",
       "in_kev": false,
       "purl": "pkg:npm/braces@3.0.2",
-      "raptor_risk_estimate": 5.7053937585937495,
+      "raptor_risk_estimate": 6.764617483523437,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -508,7 +508,7 @@
       "finding_id": "sca:vuln:npm:cookie:0.3.1:GHSA-pxg6-pf52-xh8x",
       "in_kev": false,
       "purl": "pkg:npm/cookie@0.3.1",
-      "raptor_risk_estimate": 3.8018300978124997,
+      "raptor_risk_estimate": 4.508030451103124,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -574,7 +574,7 @@
       "finding_id": "sca:vuln:npm:cross-spawn:5.1.0:GHSA-3xgq-45jj-v275",
       "in_kev": false,
       "purl": "pkg:npm/cross-spawn@5.1.0",
-      "raptor_risk_estimate": 6.764518972489688,
+      "raptor_risk_estimate": 8.828288973921747,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -638,7 +638,7 @@
       "finding_id": "sca:vuln:npm:form-data:2.3.3:GHSA-fjxv-7rqg-78g4",
       "in_kev": false,
       "purl": "pkg:npm/form-data@2.3.3",
-      "raptor_risk_estimate": 5.459775417437249,
+      "raptor_risk_estimate": 7.825478348224721,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -703,7 +703,7 @@
       "finding_id": "sca:vuln:npm:lodash:4.17.21:GHSA-f23m-r3pf-42rh",
       "in_kev": false,
       "purl": "pkg:npm/lodash@4.17.21",
-      "raptor_risk_estimate": 4.921719954531249,
+      "raptor_risk_estimate": 5.84037949285781,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -768,7 +768,7 @@
       "finding_id": "sca:vuln:npm:lodash:4.17.21:GHSA-r5fr-rjxr-66jc",
       "in_kev": false,
       "purl": "pkg:npm/lodash@4.17.21",
-      "raptor_risk_estimate": 6.1350795765675,
+      "raptor_risk_estimate": 7.279816776444675,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -832,7 +832,7 @@
       "finding_id": "sca:vuln:npm:lodash:4.17.21:GHSA-xxjr-mmjv-4gpg",
       "in_kev": false,
       "purl": "pkg:npm/lodash@4.17.21",
-      "raptor_risk_estimate": 4.922179047256249,
+      "raptor_risk_estimate": 5.840825272715062,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -898,7 +898,7 @@
       "finding_id": "sca:vuln:npm:minimist:0.0.10:GHSA-vh95-rmgr-6w4m",
       "in_kev": false,
       "purl": "pkg:npm/minimist@0.0.10",
-      "raptor_risk_estimate": 4.25893964314,
+      "raptor_risk_estimate": 5.049858232343399,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -964,7 +964,7 @@
       "finding_id": "sca:vuln:npm:minimist:0.0.10:GHSA-xvch-5gv4-984h",
       "in_kev": false,
       "purl": "pkg:npm/minimist@0.0.10",
-      "raptor_risk_estimate": 7.568736860685002,
+      "raptor_risk_estimate": 8.94949241650485,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -1030,7 +1030,7 @@
       "finding_id": "sca:vuln:npm:picomatch:2.3.1:GHSA-3v7f-55p6-f55p",
       "in_kev": false,
       "purl": "pkg:npm/picomatch@2.3.1",
-      "raptor_risk_estimate": 4.016089429316249,
+      "raptor_risk_estimate": 4.765063442783662,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -1096,7 +1096,7 @@
       "finding_id": "sca:vuln:npm:picomatch:2.3.1:GHSA-c2c7-rcm5-vvqj",
       "in_kev": false,
       "purl": "pkg:npm/picomatch@2.3.1",
-      "raptor_risk_estimate": 5.67811305628125,
+      "raptor_risk_estimate": 6.738127872775312,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -1160,7 +1160,7 @@
       "finding_id": "sca:vuln:npm:qs:6.11.2:GHSA-6rw7-vpxm-498p",
       "in_kev": false,
       "purl": "pkg:npm/qs@6.11.2",
-      "raptor_risk_estimate": 2.8046650596899996,
+      "raptor_risk_estimate": 3.3275052927488997,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -1224,7 +1224,7 @@
       "finding_id": "sca:vuln:npm:qs:6.11.2:GHSA-w7fw-mjwx-w883",
       "in_kev": false,
       "purl": "pkg:npm/qs@6.11.2",
-      "raptor_risk_estimate": 5.409471921262499,
+      "raptor_risk_estimate": 7.766376158648126,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -1289,7 +1289,7 @@
       "finding_id": "sca:vuln:npm:qs:6.5.3:GHSA-6rw7-vpxm-498p",
       "in_kev": false,
       "purl": "pkg:npm/qs@6.5.3",
-      "raptor_risk_estimate": 2.8046650596899996,
+      "raptor_risk_estimate": 3.3275052927488997,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -1353,7 +1353,7 @@
       "finding_id": "sca:vuln:npm:qs:6.11.0:GHSA-6rw7-vpxm-498p",
       "in_kev": false,
       "purl": "pkg:npm/qs@6.11.0",
-      "raptor_risk_estimate": 2.8046650596899996,
+      "raptor_risk_estimate": 3.3275052927488997,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -1417,7 +1417,7 @@
       "finding_id": "sca:vuln:npm:qs:6.11.0:GHSA-w7fw-mjwx-w883",
       "in_kev": false,
       "purl": "pkg:npm/qs@6.11.0",
-      "raptor_risk_estimate": 5.409471921262499,
+      "raptor_risk_estimate": 7.766376158648126,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -1483,7 +1483,7 @@
       "finding_id": "sca:vuln:npm:request:2.88.0:GHSA-p8p7-x288-28g6",
       "in_kev": false,
       "purl": "pkg:npm/request@2.88.0",
-      "raptor_risk_estimate": 4.67614671545125,
+      "raptor_risk_estimate": 5.536611708403011,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -1550,7 +1550,7 @@
       "finding_id": "sca:vuln:npm:semver:5.7.1:GHSA-c2qf-rxjj-qqgw",
       "in_kev": false,
       "purl": "pkg:npm/semver@5.7.1",
-      "raptor_risk_estimate": 5.7547903700625,
+      "raptor_risk_estimate": 6.812581681625623,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -1617,7 +1617,7 @@
       "finding_id": "sca:vuln:npm:semver:6.3.0:GHSA-c2qf-rxjj-qqgw",
       "in_kev": false,
       "purl": "pkg:npm/semver@6.3.0",
-      "raptor_risk_estimate": 5.7547903700625,
+      "raptor_risk_estimate": 6.812581681625623,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -1680,7 +1680,7 @@
       "finding_id": "sca:vuln:npm:serialize-javascript:4.0.0:GHSA-5c6j-r48x-rmvq",
       "in_kev": false,
       "purl": "pkg:npm/serialize-javascript@4.0.0",
-      "raptor_risk_estimate": 13.280896687499997,
+      "raptor_risk_estimate": 14.218417974374997,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -1745,7 +1745,7 @@
       "finding_id": "sca:vuln:npm:serialize-javascript:4.0.0:GHSA-qj8w-gfj5-8c6v",
       "in_kev": false,
       "purl": "pkg:npm/serialize-javascript@4.0.0",
-      "raptor_risk_estimate": 4.4666780922075,
+      "raptor_risk_estimate": 5.300559435513075,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -1810,7 +1810,7 @@
       "finding_id": "sca:vuln:npm:sha.js:2.4.11:GHSA-95m3-7q98-8xr5",
       "in_kev": false,
       "purl": "pkg:npm/sha.js@2.4.11",
-      "raptor_risk_estimate": 8.205895444207824,
+      "raptor_risk_estimate": 10.709819181983992,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -1874,7 +1874,7 @@
       "finding_id": "sca:vuln:npm:socket.io-parser:3.2.0:GHSA-677m-j7p3-52f9",
       "in_kev": false,
       "purl": "pkg:npm/socket.io-parser@3.2.0",
-      "raptor_risk_estimate": 3.7890284737499997,
+      "raptor_risk_estimate": 4.495600051237499,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -1941,7 +1941,7 @@
       "finding_id": "sca:vuln:npm:socket.io-parser:3.2.0:GHSA-cqmj-92xf-r6r9",
       "in_kev": false,
       "purl": "pkg:npm/socket.io-parser@3.2.0",
-      "raptor_risk_estimate": 5.5642063494875,
+      "raptor_risk_estimate": 6.594866391709875,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -2009,7 +2009,7 @@
       "finding_id": "sca:vuln:npm:socket.io-parser:3.2.0:GHSA-qm95-pgcg-qqfq",
       "in_kev": false,
       "purl": "pkg:npm/socket.io-parser@3.2.0",
-      "raptor_risk_estimate": 7.6235913783575,
+      "raptor_risk_estimate": 9.002756251294574,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -2075,7 +2075,7 @@
       "finding_id": "sca:vuln:npm:socket.io-parser:3.2.0:GHSA-xfhh-g9f5-x4m4",
       "in_kev": false,
       "purl": "pkg:npm/socket.io-parser@3.2.0",
-      "raptor_risk_estimate": 5.745520228499999,
+      "raptor_risk_estimate": 6.803580357585,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -2141,7 +2141,7 @@
       "finding_id": "sca:vuln:npm:socket.io:2.1.1:GHSA-25hc-qcg6-38wj",
       "in_kev": false,
       "purl": "pkg:npm/socket.io@2.1.1",
-      "raptor_risk_estimate": 5.54177790413,
+      "raptor_risk_estimate": 6.5730883311453,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -2206,7 +2206,7 @@
       "finding_id": "sca:vuln:npm:socket.io:2.1.1:GHSA-fxwf-4rqh-v8g3",
       "in_kev": false,
       "purl": "pkg:npm/socket.io@2.1.1",
-      "raptor_risk_estimate": 3.2679034928962496,
+      "raptor_risk_estimate": 3.875284235083462,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -2271,7 +2271,7 @@
       "finding_id": "sca:vuln:npm:tmp:0.0.33:GHSA-52f5-9888-hmc6",
       "in_kev": false,
       "purl": "pkg:npm/tmp@0.0.33",
-      "raptor_risk_estimate": 5.4224575355632485,
+      "raptor_risk_estimate": 7.781633114854615,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -2337,7 +2337,7 @@
       "finding_id": "sca:vuln:npm:tough-cookie:2.4.3:GHSA-72xf-g2v4-qvf3",
       "in_kev": false,
       "purl": "pkg:npm/tough-cookie@2.4.3",
-      "raptor_risk_estimate": 6.730686134120811,
+      "raptor_risk_estimate": 8.710381808201145,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -2403,7 +2403,7 @@
       "finding_id": "sca:vuln:npm:urijs:1.17.1:GHSA-3329-pjwv-fjpg",
       "in_kev": false,
       "purl": "pkg:npm/urijs@1.17.1",
-      "raptor_risk_estimate": 4.98553384330625,
+      "raptor_risk_estimate": 5.902342893015562,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -2467,7 +2467,7 @@
       "finding_id": "sca:vuln:npm:urijs:1.17.1:GHSA-3vjf-82ff-p4r3",
       "in_kev": false,
       "purl": "pkg:npm/urijs@1.17.1",
-      "raptor_risk_estimate": 5.49090841221,
+      "raptor_risk_estimate": 6.507365030990099,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -2532,7 +2532,7 @@
       "finding_id": "sca:vuln:npm:urijs:1.17.1:GHSA-89gv-h8wf-cg8r",
       "in_kev": false,
       "purl": "pkg:npm/urijs@1.17.1",
-      "raptor_risk_estimate": 4.027132375093749,
+      "raptor_risk_estimate": 4.775786162888437,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -2597,7 +2597,7 @@
       "finding_id": "sca:vuln:npm:urijs:1.17.1:GHSA-8h2f-7jc4-7m3m",
       "in_kev": false,
       "purl": "pkg:npm/urijs@1.17.1",
-      "raptor_risk_estimate": 4.651050235065,
+      "raptor_risk_estimate": 5.512242981052649,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -2661,7 +2661,7 @@
       "finding_id": "sca:vuln:npm:urijs:1.17.1:GHSA-g694-m8vq-gv9h",
       "in_kev": false,
       "purl": "pkg:npm/urijs@1.17.1",
-      "raptor_risk_estimate": 4.939854117168749,
+      "raptor_risk_estimate": 5.857987797219187,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -2726,7 +2726,7 @@
       "finding_id": "sca:vuln:npm:urijs:1.17.1:GHSA-gcv8-gh4r-25x6",
       "in_kev": false,
       "purl": "pkg:npm/urijs@1.17.1",
-      "raptor_risk_estimate": 4.93250863356875,
+      "raptor_risk_estimate": 5.850855319503188,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -2791,7 +2791,7 @@
       "finding_id": "sca:vuln:npm:urijs:1.17.1:GHSA-gmv4-r438-p67f",
       "in_kev": false,
       "purl": "pkg:npm/urijs@1.17.1",
-      "raptor_risk_estimate": 4.05670500954875,
+      "raptor_risk_estimate": 4.804501243846988,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -2856,7 +2856,7 @@
       "finding_id": "sca:vuln:npm:urijs:1.17.1:GHSA-p6j9-7xhc-rhwp",
       "in_kev": false,
       "purl": "pkg:npm/urijs@1.17.1",
-      "raptor_risk_estimate": 5.748698562749999,
+      "raptor_risk_estimate": 6.8066665258275005,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -2919,7 +2919,7 @@
       "finding_id": "sca:vuln:npm:useragent:2.3.0:GHSA-mgfv-m47x-4wqp",
       "in_kev": false,
       "purl": "pkg:npm/useragent@2.3.0",
-      "raptor_risk_estimate": 5.691753407437501,
+      "raptor_risk_estimate": 6.751372678149375,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -2984,7 +2984,7 @@
       "finding_id": "sca:vuln:npm:word-wrap:1.2.3:GHSA-j8xg-fqg3-53r7",
       "in_kev": false,
       "purl": "pkg:npm/word-wrap@1.2.3",
-      "raptor_risk_estimate": 5.406698294907,
+      "raptor_risk_estimate": 7.763117391303049,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -3053,7 +3053,7 @@
       "finding_id": "sca:vuln:npm:ws:3.3.3:GHSA-3h5v-q93c-6h6q",
       "in_kev": false,
       "purl": "pkg:npm/ws@3.3.3",
-      "raptor_risk_estimate": 6.839217773200311,
+      "raptor_risk_estimate": 8.908074909953038,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -3119,7 +3119,7 @@
       "finding_id": "sca:vuln:npm:xmlhttprequest-ssl:1.5.5:GHSA-72mh-269x-7mh5",
       "in_kev": false,
       "purl": "pkg:npm/xmlhttprequest-ssl@1.5.5",
-      "raptor_risk_estimate": 7.1467766651775,
+      "raptor_risk_estimate": 8.474452581818774,
       "reachability": {
         "confidence": {
           "level": "medium",
@@ -3185,7 +3185,7 @@
       "finding_id": "sca:vuln:npm:xmlhttprequest-ssl:1.5.5:GHSA-h4j5-c7cj-74xg",
       "in_kev": false,
       "purl": "pkg:npm/xmlhttprequest-ssl@1.5.5",
-      "raptor_risk_estimate": 10.42636305893,
+      "raptor_risk_estimate": 11.7242525670333,
       "reachability": {
         "confidence": {
           "level": "medium",

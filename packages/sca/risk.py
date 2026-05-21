@@ -45,8 +45,8 @@ _CVSS_MISSING_DEFAULT = 5.0
 # KEV — known-exploited get a floor + multiplier. Floor of 80 means a
 # KEV CVE with low CVSS still ranks above a non-KEV high-CVSS finding,
 # matching the "active exploitation > theoretical severity" priority.
-_KEV_FLOOR = 88.0
-_KEV_MULTIPLIER = 1.32
+_KEV_FLOOR = 96.8
+_KEV_MULTIPLIER = 1.452
 
 # Exploit-evidence (Exploit-DB / Metasploit / GitHub PoC). KEV's the
 # strongest "actively exploited in the wild" signal, but it covers
@@ -59,26 +59,26 @@ _KEV_MULTIPLIER = 1.32
 # in EDB. Floor is below KEV's so KEV-listed still wins on tied CVSS;
 # multiplier is smaller for the same reason — EDB/MSF/PoC are weaker
 # signals than active CISA-tracked exploitation.
-_EXPLOIT_EVIDENCE_FLOOR = 60.0
+_EXPLOIT_EVIDENCE_FLOOR = 66.0
 # Strictly below `_KEV_MULTIPLIER` — pinned by `is_admissible`'s
 # `exploit_evidence_strictly_below_kev` rule. A previous refit
 # pass set this to 1.21 which crossed KEV's 1.20; round-2 with
 # constraint-aware refit caught the violation. If KEV_MULT moves
 # later this constant has headroom to follow.
-_EXPLOIT_EVIDENCE_MULTIPLIER = 1.19
+_EXPLOIT_EVIDENCE_MULTIPLIER = 1.309
 
 # EPSS — exploit probability in the wild. Even a 0% EPSS leaves 30%
 # weight (a vuln with no observed exploitation isn't impossible to
 # exploit; the floor reflects "unknown is not zero").
-_EPSS_FLOOR_MULTIPLIER = 0.30
-_EPSS_RANGE_MULTIPLIER = 0.70
+_EPSS_FLOOR_MULTIPLIER = 0.33
+_EPSS_RANGE_MULTIPLIER = 0.63
 _EPSS_MISSING_DEFAULT = 0.5
 
 # Reachability — confidently-not-reachable downgrades hard; uncertain
 # stays neutral. ``not_evaluated`` (no evidence either way) gets a
 # small penalty to nudge operators toward investigating.
-_REACH_NOT_REACHABLE_MAX_REDUCTION = 0.63
-_REACH_NOT_EVALUATED_MULTIPLIER = 0.935
+_REACH_NOT_REACHABLE_MAX_REDUCTION = 0.567
+_REACH_NOT_EVALUATED_MULTIPLIER = 0.8415
 
 # Exposure — call-site density. Maps 0.0..1.0 onto 0.5..1.0 so a dep
 # imported once has half the weight of a dep imported throughout the

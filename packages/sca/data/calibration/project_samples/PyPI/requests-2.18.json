@@ -49,7 +49,7 @@
       "finding_id": "sca:vuln:PyPI:pytest:2.8.0:GHSA-6w46-j5rx-g56g",
       "in_kev": false,
       "purl": "pkg:pypi/pytest@2.8.0",
-      "raptor_risk_estimate": 9.20678877,
+      "raptor_risk_estimate": 10.127209893,
       "reachability": {
         "confidence": {
           "level": "high",
@@ -115,7 +115,7 @@
       "finding_id": "sca:vuln:PyPI:setuptools:18.5:GHSA-5rjg-fvgr-3xxf",
       "in_kev": false,
       "purl": "pkg:pypi/setuptools@18.5",
-      "raptor_risk_estimate": 9.775610423249999,
+      "raptor_risk_estimate": 12.984757300919249,
       "reachability": {
         "confidence": {
           "level": "high",
@@ -187,7 +187,7 @@
       "finding_id": "sca:vuln:PyPI:setuptools:18.5:GHSA-cx63-2mw6-8hw5",
       "in_kev": false,
       "purl": "pkg:pypi/setuptools@18.5",
-      "raptor_risk_estimate": 16.6031036248,
+      "raptor_risk_estimate": 19.555895988552003,
       "reachability": {
         "confidence": {
           "level": "high",
@@ -260,7 +260,7 @@
       "finding_id": "sca:vuln:PyPI:setuptools:18.5:GHSA-r9hx-vwmv-q579",
       "in_kev": false,
       "purl": "pkg:pypi/setuptools@18.5",
-      "raptor_risk_estimate": 10.274657906249999,
+      "raptor_risk_estimate": 11.277817115625,
       "reachability": {
         "confidence": {
           "level": "high",

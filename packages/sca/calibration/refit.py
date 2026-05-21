@@ -266,7 +266,7 @@ def grid_search_refit(
     # tuple so once the corpus saturates top-20 at 1.000 the search
     # keeps moving on top-50 instead of silently sticking to the
     # first-seen candidate.
-    SENTINEL_INADMISSIBLE = (float("-inf"), float("-inf"))
+    SENTINEL_INADMISSIBLE = (float("-inf"), float("-inf"), float("-inf"))
 
     per_constant: List[ConstantRefit] = []
     for name in TUNABLE_CONSTANTS:
@@ -276,7 +276,7 @@ def grid_search_refit(
             cur * (1.0 - max_delta),
             cur * (1.0 + max_delta),
         ]
-        metrics: List[Tuple[float, float]] = []
+        metrics: List[Tuple[float, float, float]] = []
         for c in candidates:
             full_values = {**current, name: c}
             ok, _reason = is_admissible(full_values)
@@ -341,17 +341,42 @@ def grid_search_refit(
     )
     improvement = joint_precision - baseline
 
+    # ρ-aware improvement gate. When P20 is saturated at 1.0
+    # across many candidates (the post-Vulnrichment regime),
+    # the legacy P20-only gate rejects everything because there's
+    # no room to improve. ρ catches the case where the joint
+    # weight set improves rank correlation across the WHOLE
+    # corpus even when top-20 is already perfect. The two
+    # improvements compose via OR — either dimension reaching
+    # the threshold accepts the refit. Same threshold value is
+    # reused for ρ (5% in [0, 1] terms = a meaningful jump for
+    # rank correlation).
+    baseline_rho_tuple = _search_metric(samples, overrides=None)
+    baseline_rho = baseline_rho_tuple[2]
+    joint_rho = (
+        _search_metric(samples, overrides=joint_overrides)[2]
+        if joint_overrides else baseline_rho
+    )
+    rho_improvement = joint_rho - baseline_rho
+
     if not joint_overrides:
         status = "rejected"
         notes.append("no per-constant variant beat the baseline")
-    elif improvement < improvement_threshold:
+    elif (improvement < improvement_threshold
+            and rho_improvement < improvement_threshold):
         status = "rejected"
         notes.append(
-            f"joint improvement {improvement:.3f} below threshold "
-            f"{improvement_threshold:.3f}; refit not shipped"
+            f"joint P20 improvement {improvement:+.3f} AND ρ "
+            f"improvement {rho_improvement:+.3f} both below "
+            f"threshold {improvement_threshold:.3f}; refit not shipped"
         )
     else:
         status = "proposed"
+        if rho_improvement >= improvement_threshold:
+            notes.append(
+                f"accepted on ρ improvement {rho_improvement:+.3f} "
+                f"(P20 improvement {improvement:+.3f})"
+            )
         notes.append(
             f"joint improvement {improvement:.3f} ≥ threshold "
             f"{improvement_threshold:.3f}; refit ready to apply"
@@ -511,36 +536,38 @@ def _search_metric(
     samples: List[Tuple[Dict[str, Any], int]],
     *,
     overrides: Optional[Dict[str, float]] = None,
-) -> Tuple[float, float]:
-    """Composite (top-20 precision, NDCG@20) used by the grid
-    search's argmax.
+) -> Tuple[float, float, float]:
+    """Composite ``(top_20_precision, NDCG@20, spearman_rho)``
+    used by the grid search's argmax.
 
-    Tuple semantics: max() over Python tuples compares
-    lexicographically — top-20 precision dominates (it's the
-    operator-facing verdict metric), NDCG@20 acts only when
-    precision is tied. NDCG@20 is the standard ranking-quality
-    metric for top-k (Normalised Discounted Cumulative Gain): it
-    rewards exploited findings appearing at LOW ranks within the
-    top-k more than at high ranks.
+    Tuple semantics: ``max()`` over Python tuples compares
+    lexicographically:
+      * top-20 precision dominates — the operator-facing verdict
+        metric.
+      * NDCG@20 breaks P20 ties — rewards within-top-20 ordering.
+      * Spearman ρ breaks NDCG ties — captures rank correlation
+        across the WHOLE corpus, not just top-20.
 
-    Why NDCG over the previous top-50 tiebreaker:
+    The ρ term was added 2026-05-21 after the CISA Vulnrichment
+    ground-truth integration. Adding 29,727 new exploited-CVE
+    labels (most with SSVC=poc) pushed P20 to saturation (1.0)
+    AND NDCG@20 close to saturation across many weight settings.
+    Without a corpus-wide signal, the search couldn't
+    distinguish weights that ranked the new SSVC-only findings
+    correctly from weights that left them low. Adding ρ as a
+    third tiebreaker lets the search prefer weight sets that
+    rank ALL exploited findings appropriately, not just the top
+    20. This matches validate.py's verdict gate (ρ ≥ 0.4) so the
+    search optimises the same metric the verdict tests.
 
-      * top-20 precision saturates at 1.0 when all 20 of top-20
-        are exploited, regardless of WHICH 20. With 61 exploited
-        findings in the round-3 corpus, multiple weight settings
-        all hit precision=1.0 — the search couldn't distinguish.
-      * top-50 was a coarser-grained tiebreaker that ALSO
-        saturates once 50 of the corpus's 61 are in top-50.
-      * NDCG@20 is continuous on [0, 1] and stays sensitive to
-        the WITHIN-top-20 ordering: a candidate that puts the
-        most-confidently-exploited finding at rank 1 vs rank 18
-        scores higher even when both candidates have precision=1.0.
-
-    Returns ``(top_20_precision, ndcg_20)``. Both fall back to
-    0.0 when no findings have a usable score.
+    Returns ``(top_20_precision, ndcg_20, spearman_rho)``. Each
+    falls back to 0.0 when undefined (empty samples / no usable
+    scores / constant labels — the last case happens when every
+    finding has the same exploited-or-not label and ρ is
+    mathematically undefined).
     """
     if not samples:
-        return (0.0, 0.0)
+        return (0.0, 0.0, 0.0)
     rescored: List[Tuple[float, int]] = []
     for finding_dict, label in samples:
         score = _rescore_finding(finding_dict, overrides)
@@ -548,12 +575,19 @@ def _search_metric(
             continue
         rescored.append((score, label))
     if not rescored:
-        return (0.0, 0.0)
+        return (0.0, 0.0, 0.0)
     rescored.sort(key=lambda t: -t[0])
     top20 = rescored[:20]
     p20 = (sum(label for _, label in top20) / len(top20)) if top20 else 0.0
     ndcg20 = _ndcg_at_n(rescored, n=20)
-    return (p20, ndcg20)
+    # ρ across the whole corpus. Use validate's hand-rolled
+    # implementation (no scipy). ``None`` (constant labels)
+    # collapses to 0.0 so the tuple comparison stays well-defined.
+    from .validate import _spearman_rho
+    scores = [s for s, _ in rescored]
+    labels = [lbl for _, lbl in rescored]
+    rho = _spearman_rho(scores, labels)
+    return (p20, ndcg20, rho if rho is not None else 0.0)
 
 
 def _ndcg_at_n(
