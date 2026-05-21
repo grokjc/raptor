@@ -38,6 +38,7 @@ from urllib.parse import urlparse
 
 from core.config import RaptorConfig
 from core.git.validate import validate_repo_url
+from core.security.redaction import redact_url_secrets_only
 
 # Git allows SHA abbreviations of 4+ chars; full SHA-1 is 40 hex.
 # We reject anything that doesn't match this shape so a tainted SHA
@@ -287,7 +288,12 @@ def clone_repository(
         cmd.extend(["--depth", str(depth), "--no-tags"])
     cmd.extend([url, str(target)])
 
-    logger.info("git clone: %s -> %s", url, target)
+    # Redact any embedded credentials in the URL before logging.
+    # ``validate_repo_url`` rejects userinfo upstream, but a future
+    # caller path (or an upstream validator bypass) shouldn't leak
+    # ``https://user:token@host/...`` into operator logs. Belt-and-
+    # braces — symmetric posture with the rest of the codebase.
+    logger.info("git clone: %s -> %s", redact_url_secrets_only(url), target)
     try:
         from core.sandbox import run_untrusted
     except ImportError:
@@ -443,7 +449,10 @@ def fetch_commit(
                 f"set-url={set_msg or 'unknown error'}"
             )
 
-    logger.info("git fetch (depth=%d): %s @ %s", depth, url, sha)
+    logger.info(
+        "git fetch (depth=%d): %s @ %s",
+        depth, redact_url_secrets_only(url), sha,
+    )
     proc = _run(
         [
             "git", "-C", str(repo_dir), "fetch",
