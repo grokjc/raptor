@@ -384,8 +384,15 @@ class Pipeline:
         if self.progress_callback is not None:
             try:
                 self.progress_callback(stage, status, info)
-            except Exception:  # noqa: BLE001 — never break pipeline on bad callback
-                pass
+            except Exception as exc:  # noqa: BLE001 — never break pipeline on bad callback
+                # Log at DEBUG so a misbehaving callback is
+                # diagnosable from --verbose without aborting the
+                # pipeline. Pre-fix this was completely silent.
+                import logging as _logging
+                _logging.getLogger(__name__).debug(
+                    "progress_callback raised %s: %s",
+                    type(exc).__name__, exc, exc_info=True,
+                )
 
     def _run_agent(self, cve_id: str) -> AgentResult:
         self._last_meta_retry_attempted = False

@@ -1281,8 +1281,12 @@ def main():
                 print()
                 print(format_summary(cov))
                 print()
-        except Exception:
-            pass
+        except (ImportError, FileNotFoundError) as exc:
+            # Narrowed: ImportError if the optional summary module
+            # isn't installed; FileNotFoundError if checklist hasn't
+            # been created yet. Other errors propagate so they
+            # surface instead of silently dropping the summary.
+            logger.debug("scanner: coverage summary unavailable: %s", exc)
 
         result = {
             "status": "ok",
@@ -1312,8 +1316,14 @@ def main():
         if not args.keep:
             try:
                 shutil.rmtree(tmp)
-            except Exception:
-                pass
+            except OSError as exc:
+                # rmtree failure on the scratch dir — log at WARNING
+                # so the operator can spot the leak. Pre-fix this
+                # was completely silent.
+                logger.warning(
+                    "scanner: failed to clean up scratch dir %s: %s",
+                    tmp, exc,
+                )
 
 
 if __name__ == "__main__":

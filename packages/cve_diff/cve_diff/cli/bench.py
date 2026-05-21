@@ -271,8 +271,12 @@ def _write_failure_md(output_dir: Path, cve_id: str, error_class: str,
         from cve_diff.report.markdown import render_failure
         text = render_failure(cve_id, error_class, error_text)
         (output_dir / f"{cve_id}.md").write_text(text)
-    except Exception:  # noqa: BLE001 — report write must not abort bench
-        pass
+    except Exception as exc:  # noqa: BLE001 — report write must not abort bench
+        import logging as _logging
+        _logging.getLogger(__name__).debug(
+            "bench: failure-report write failed for %s: %s",
+            cve_id, exc, exc_info=True,
+        )
 
 
 def _write_flow(output_dir: Path, cve_id: str, result: "_CveResult",
