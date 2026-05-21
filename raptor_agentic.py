@@ -671,8 +671,16 @@ Examples:
         """
     )
 
-    parser.add_argument("--repo", default=os.environ.get("RAPTOR_CALLER_DIR"),
-                        help="Path to repository to analyse (default: directory raptor was launched from)")
+    parser.add_argument(
+        "--repo", default=os.environ.get("RAPTOR_CALLER_DIR"),
+        help=(
+            "Path to repository to analyse (default: $RAPTOR_CALLER_DIR "
+            "— set by the bin/raptor wrapper to the operator's cwd at "
+            "launch time. When the script is invoked directly without "
+            "the wrapper, RAPTOR_CALLER_DIR is unset and --repo is "
+            "required)."
+        ),
+    )
     parser.add_argument("--policy-groups", default="all", help="Comma-separated policy groups (default: all)")
     parser.add_argument("--max-findings", type=int, default=10, help="Maximum findings to process (default: 10; codeql-only default is 20, agentic is lower because each finding runs the full multi-pass LLM analysis chain at ~3-5x the per-finding cost)")
     parser.add_argument(
@@ -925,11 +933,28 @@ Examples:
             # paths in the except handlers below, leaking raptor_git_*/ under
             # /tmp on every failed non-git target. atexit fires on sys.exit too.
             def _cleanup_git_temp(p=temp_dir):
+                # ``atexit`` callbacks run after most interpreter
+                # shutdown teardown — by which point the logging
+                # module may have closed its file handles. Pre-fix
+                # we relied on ``logger.warning(...)`` to surface
+                # cleanup failures, but at exit time that often
+                # raised "I/O operation on closed file" and the
+                # warning was swallowed by the surrounding
+                # ``except Exception: pass``. Defer to ``sys.stderr``
+                # which is fd-2 and stays writable past logging
+                # shutdown — cleanup failures are visible to the
+                # operator even on Ctrl-C.
                 try:
                     if p.exists():
                         shutil.rmtree(str(p))
-                except Exception:
-                    pass
+                except OSError as e:
+                    try:
+                        sys.stderr.write(
+                            f"[atexit] git_temp_dir cleanup failed for "
+                            f"{p}: {e}\n",
+                        )
+                    except Exception:
+                        pass
             atexit.register(_cleanup_git_temp)
             temp_repo = temp_dir / repo_path.name
             # Copy symlinks as-is, don't follow them into files outside the repo

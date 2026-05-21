@@ -488,6 +488,18 @@ def mode_doctor(args: list) -> int:
     contract (no logo, failures-first, non-zero exit on real
     failure). All flags pass through to ``doctor.main``.
     """
+    # One-line preamble: doctor is the ONE mode that runs without an
+    # LLM. New operators hitting an LLM-config issue often don't
+    # realise that. Printing the hint to stderr (operator-visible but
+    # not captured into stdout-redirected reports) makes the
+    # diagnostic path discoverable on first contact. Skip when the
+    # ``--help`` flag is being parsed — argparse's auto-help renders
+    # next and the preamble would just clutter the help block.
+    if "--help" not in args and "-h" not in args:
+        print(
+            "[doctor] no LLM required — diagnostic only.",
+            file=sys.stderr,
+        )
     from core.startup.doctor import main as doctor_main
     return doctor_main(args)
 
@@ -571,7 +583,8 @@ Examples:
   # LLM analysis of existing SARIF
   python3 raptor.py analyze --repo /path/to/code --sarif findings.sarif
 
-Sandbox isolation (available on all modes):
+Sandbox isolation (mode-level flags — pass them AFTER the mode name,
+not before; the top-level parser does not declare them directly):
   --sandbox {full,debug,network-only,none}
                         Force a sandbox profile (default: full)
   --no-sandbox          Alias for --sandbox none
@@ -579,6 +592,10 @@ Sandbox isolation (available on all modes):
                         (composes with --sandbox profiles other than 'none')
   --audit-verbose       With --audit, log every traced syscall
                         (strace-style diagnostic)
+
+  Run ``python3 raptor.py <mode> --help`` to see them in the mode's
+  own argparse-generated list (they are added by
+  ``core.sandbox.add_cli_args``, not the top-level parser).
 
   # Examples
   python3 raptor.py agentic --repo /code --audit          # log + run
