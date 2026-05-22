@@ -40,7 +40,24 @@ logger = get_logger()
 def main() -> None:
     # So much more needed here but this is a start for us. :-)
     ap = argparse.ArgumentParser(
-        description="RAPTOR Fuzzing Mode - Binary fuzzing with LLM analysis"
+        description="RAPTOR Fuzzing Mode - Binary fuzzing with LLM analysis",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+Examples:
+  # One-hour AFL++ fuzz of /usr/bin/foo with the default 10-crash cap:
+  python3 raptor_fuzzing.py --binary /usr/bin/foo --duration 3600
+
+  # Autonomous run with explicit goal + memory persistence:
+  python3 raptor_fuzzing.py --binary ./target --autonomous \\
+      --goal 'find heap overflow' --memory-file mem.json
+
+  # Force the orchestrator (libFuzzer + telemetry) and stop after planning:
+  python3 raptor_fuzzing.py --binary ./target --orchestrator --plan-only
+
+  # Force the legacy AFL++-only path (e.g. for reproducing pre-orchestrator
+  # behaviour):
+  python3 raptor_fuzzing.py --binary ./target --legacy
+""",
     )
 
     ap.add_argument("--binary", required=True, help="Path to binary to fuzz")
@@ -56,16 +73,21 @@ def main() -> None:
     ap.add_argument("--recompile-guide", action="store_true", help="Show guide for recompiling binary with AFL instrumentation and sanitizers")
     ap.add_argument("--use-showmap", action="store_true", help="Run afl-showmap after fuzzing for coverage analysis")
     ap.add_argument("--autonomous", action="store_true", help="Enable autonomous mode with intelligent decision-making and learning")
-    ap.add_argument("--memory-file", help="Path to memory file for learning persistence (default: ~/.raptor/fuzzing_memory.json)")
+    ap.add_argument("--memory-file", help="Path to memory file for learning persistence (default resolves to ${HOME}/.raptor/fuzzing_memory.json — note: under 'sudo -E' HOME expands to root, not the operator's home)")
     ap.add_argument("--goal", help="High-level goal to achieve (e.g., 'find heap overflow', 'target parser code')")
 
     # New orchestrator-driven path: capability detection, libFuzzer support,
     # binary_understand via radare2, live telemetry. Default on macOS where
     # AFL++ has shmem issues; can be forced or disabled with these flags.
-    ap.add_argument("--orchestrator", action="store_true",
+    # ``--orchestrator`` and ``--legacy`` are mutually exclusive — passing
+    # both at once previously silently let ``--legacy`` win (since the path
+    # selection branch checked ``args.legacy`` first), which was confusing
+    # for operators who set both in environments / CI matrices.
+    path_group = ap.add_mutually_exclusive_group()
+    path_group.add_argument("--orchestrator", action="store_true",
                     help="Force the new orchestrator pipeline (libFuzzer + AFL++ "
                          "with target detection, capability checks, telemetry)")
-    ap.add_argument("--legacy", action="store_true",
+    path_group.add_argument("--legacy", action="store_true",
                     help="Force the legacy AFL++-only fuzzing path")
     ap.add_argument("--plan-only", action="store_true",
                     help="With --orchestrator, print the plan and exit without running")
@@ -152,8 +174,16 @@ def main() -> None:
         llm = None
         try:
             llm = get_client()
-        except Exception:
-            pass
+        except Exception as e:
+            # Fall through to llm=None (orchestrator handles
+            # no-LLM mode) but surface why so operators can see
+            # whether a config issue is silently downgrading
+            # them to non-LLM fuzzing.
+            logger.debug(
+                "Fuzzing orchestrator: LLM client init failed: %s; "
+                "proceeding without LLM",
+                e,
+            )
 
         orch = FuzzingOrchestrator(llm=llm)
         plan = orch.plan(binary_path)
@@ -236,9 +266,20 @@ def main() -> None:
         logger.info("AUTONOMOUS MODE ENABLED")
         logger.info("=" * 70)
 
-        # Initialize fuzzing memory for learning
+        # Initialize fuzzing memory for learning. Log the resolved
+        # path so the operator can spot a wrong ~ expansion
+        # (e.g. under ``sudo -E``, HOME resolves to /root, not the
+        # operator's home, and the default
+        # ``~/.raptor/fuzzing_memory.json`` ends up in the wrong
+        # tree without warning).
         memory_file = Path(args.memory_file) if args.memory_file else None
         memory = FuzzingMemory(memory_file)
+        try:
+            resolved_memory_path = memory_file.expanduser().resolve() if memory_file else None
+        except (OSError, RuntimeError):
+            resolved_memory_path = memory_file
+        if resolved_memory_path is not None:
+            logger.info(f"Fuzzing memory path: {resolved_memory_path}")
 
         # Initialize autonomous planner
         planner = FuzzingPlanner(memory=memory)

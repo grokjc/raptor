@@ -81,8 +81,26 @@ def run_command_streaming(
                     if display.startswith("[INFO] "):
                         display = display[7:]
                     print(f"{prefix}{display}", flush=True)
-        except Exception:
-            pass
+        except Exception as exc:
+            # Pre-fix the exception silently exited the reader thread.
+            # Parent never learned the child's output stopped
+            # streaming, and the consumed-but-not-stored output was
+            # dropped from run logs. Push a sentinel so the caller
+            # can detect truncation post-hoc, and surface the cause
+            # to stderr (loggers may not be configured at this depth
+            # of the call stack).
+            sentinel = (
+                f"[RAPTOR stream_output reader aborted: "
+                f"{type(exc).__name__}: {exc!s}]\n"
+            )
+            try:
+                storage.append(sentinel)
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                print(sentinel, end="", file=sys.stderr, flush=True)
+            except Exception:  # noqa: BLE001
+                pass
         finally:
             pipe.close()
 
@@ -653,10 +671,18 @@ Examples:
         """
     )
 
-    parser.add_argument("--repo", default=os.environ.get("RAPTOR_CALLER_DIR"),
-                        help="Path to repository to analyse (default: directory raptor was launched from)")
+    parser.add_argument(
+        "--repo", default=os.environ.get("RAPTOR_CALLER_DIR"),
+        help=(
+            "Path to repository to analyse (default: $RAPTOR_CALLER_DIR "
+            "— set by the bin/raptor wrapper to the operator's cwd at "
+            "launch time. When the script is invoked directly without "
+            "the wrapper, RAPTOR_CALLER_DIR is unset and --repo is "
+            "required)."
+        ),
+    )
     parser.add_argument("--policy-groups", default="all", help="Comma-separated policy groups (default: all)")
-    parser.add_argument("--max-findings", type=int, default=10, help="Maximum findings to process (default: 10)")
+    parser.add_argument("--max-findings", type=int, default=10, help="Maximum findings to process (default: 10; codeql-only default is 20, agentic is lower because each finding runs the full multi-pass LLM analysis chain at ~3-5x the per-finding cost)")
     parser.add_argument(
         "--phase-timeout", type=int,
         default=RaptorConfig.DEFAULT_TIMEOUT, metavar="SECONDS",
@@ -681,10 +707,17 @@ Examples:
     parser.add_argument("--mode", choices=["fast", "thorough"], default="thorough",
                        help="fast: quick scan, thorough: detailed analysis")
 
-    # CodeQL integration
-    parser.add_argument("--codeql", action="store_true", help="Enable CodeQL scanning (in addition to Semgrep)")
-    parser.add_argument("--codeql-only", action="store_true", help="Run CodeQL only (skip Semgrep)")
-    parser.add_argument("--no-codeql", action="store_true", help="Disable CodeQL scanning (Semgrep only)")
+    # CodeQL integration — mutually exclusive. Pre-fix all three
+    # flags were independent ``store_true`` booleans, so combinations
+    # like ``--codeql-only --no-codeql`` resolved to
+    # ``run_semgrep=False, run_codeql=False`` (neither scanner runs)
+    # and the pipeline still reported "complete" with zero findings.
+    # Mutually exclusive group rejects the contradictory combo at
+    # argparse time with a clear error.
+    _codeql_group = parser.add_mutually_exclusive_group()
+    _codeql_group.add_argument("--codeql", action="store_true", help="Enable CodeQL scanning (in addition to Semgrep)")
+    _codeql_group.add_argument("--codeql-only", action="store_true", help="Run CodeQL only (skip Semgrep)")
+    _codeql_group.add_argument("--no-codeql", action="store_true", help="Disable CodeQL scanning (Semgrep only)")
     parser.add_argument("--languages", help="Languages for CodeQL (comma-separated, auto-detected if not specified)")
     parser.add_argument("--build-command", help="Custom build command for CodeQL")
     parser.add_argument("--extended", action="store_true", help="Use CodeQL extended security suites")
@@ -785,7 +818,13 @@ Examples:
              "database) is on whenever --codeql produced a database. Pass this "
              "flag to skip validation completely.",
     )
-    parser.add_argument(
+    # --deep-validate / --no-deep-validate are contradictory; the
+    # help text claimed "Takes precedence over --deep-validate" but
+    # argparse didn't enforce that — both flags landed on args and
+    # downstream code read them independently. Mutex group makes
+    # argparse reject the contradictory combo with a clear error.
+    _deep_group = parser.add_mutually_exclusive_group()
+    _deep_group.add_argument(
         "--deep-validate",
         action="store_true",
         help="Force-enable Tier 2 / Tier 3 of IRIS validation for ALL "
@@ -798,7 +837,7 @@ Examples:
              "thinks it can SMT-check); pass --no-deep-validate to disable "
              "even that auto-enable path.",
     )
-    parser.add_argument(
+    _deep_group.add_argument(
         "--no-deep-validate",
         action="store_true",
         help="Hard kill-switch: disable Tier 2 / Tier 3 entirely, including "
@@ -894,11 +933,28 @@ Examples:
             # paths in the except handlers below, leaking raptor_git_*/ under
             # /tmp on every failed non-git target. atexit fires on sys.exit too.
             def _cleanup_git_temp(p=temp_dir):
+                # ``atexit`` callbacks run after most interpreter
+                # shutdown teardown — by which point the logging
+                # module may have closed its file handles. Pre-fix
+                # we relied on ``logger.warning(...)`` to surface
+                # cleanup failures, but at exit time that often
+                # raised "I/O operation on closed file" and the
+                # warning was swallowed by the surrounding
+                # ``except Exception: pass``. Defer to ``sys.stderr``
+                # which is fd-2 and stays writable past logging
+                # shutdown — cleanup failures are visible to the
+                # operator even on Ctrl-C.
                 try:
                     if p.exists():
                         shutil.rmtree(str(p))
-                except Exception:
-                    pass
+                except OSError as e:
+                    try:
+                        sys.stderr.write(
+                            f"[atexit] git_temp_dir cleanup failed for "
+                            f"{p}: {e}\n",
+                        )
+                    except Exception:
+                        pass
             atexit.register(_cleanup_git_temp)
             temp_repo = temp_dir / repo_path.name
             # Copy symlinks as-is, don't follow them into files outside the repo
@@ -1135,6 +1191,23 @@ Examples:
     run_semgrep = not args.codeql_only
     run_codeql = (args.codeql or args.codeql_only) and not args.no_codeql
 
+    # Defensive guard for the "no scanners enabled" case. The
+    # mutex group on ``--codeql / --codeql-only / --no-codeql``
+    # makes this structurally unreachable today (you can't pass
+    # both ``--codeql-only`` and ``--no-codeql`` simultaneously),
+    # but if either resolution rule above ever shifts — or a
+    # caller mutates ``args`` between argparse and here — we don't
+    # want the pipeline silently walking to completion with
+    # zero findings and reporting "clean". Bail loudly instead.
+    if not (run_semgrep or run_codeql):
+        print(
+            "\n✗ Both Semgrep and CodeQL are disabled — nothing to scan.\n"
+            "  Re-run without --codeql-only / --no-codeql, or pass only one "
+            "of those flags.",
+            file=sys.stderr,
+        )
+        return 2
+
     semgrep_cmd = None
     codeql_cmd = None
     semgrep_proc = None
@@ -1242,7 +1315,19 @@ Examples:
             rc = semgrep_proc.returncode
         except subprocess.TimeoutExpired:
             semgrep_proc.kill()
-            semgrep_proc.communicate()
+            # Bound the post-kill drain — pre-fix bare
+            # ``communicate()`` had no timeout and could wedge on a
+            # child stuck in uninterruptible IO inside the sandbox.
+            # 30s is generous for a kill-9'd process to release its
+            # FDs; on TimeoutExpired here we abandon the streams
+            # (FDs leaked, but the kill has already been sent).
+            try:
+                semgrep_proc.communicate(timeout=30)
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    "Semgrep child did not drain after kill; "
+                    "abandoning communicate (FDs may leak)"
+                )
             rc = -1
             print("❌ Semgrep scan timed out (30m)")
             logger.error("Semgrep scan timed out")
@@ -1307,7 +1392,14 @@ Examples:
             rc = codeql_proc.returncode
         except subprocess.TimeoutExpired:
             codeql_proc.kill()
-            codeql_proc.communicate()
+            # See Semgrep post-kill drain above for the rationale.
+            try:
+                codeql_proc.communicate(timeout=30)
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    "CodeQL child did not drain after kill; "
+                    "abandoning communicate (FDs may leak)"
+                )
             rc = -1
             print("❌ CodeQL scan timed out (30m)")
             logger.error("CodeQL scan timed out")

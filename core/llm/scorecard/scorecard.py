@@ -196,17 +196,6 @@ class DecisionClassStats:
     events: Dict[str, _EventCounts]
     disagreement_samples: List[Dict[str, str]] = field(default_factory=list)
 
-    def cheap_total(self) -> int:
-        """Convenience: total observations for the cheap-short-circuit
-        event type. The denominator for the trust gate."""
-        return self.events[EventType.CHEAP_SHORT_CIRCUIT].total()
-
-    def cheap_miss_count(self) -> int:
-        """Convenience: count of times cheap was wrong (the cell's
-        ``incorrect`` count for cheap_short_circuit)."""
-        return self.events[EventType.CHEAP_SHORT_CIRCUIT].incorrect
-
-
 def _wilson_upper_bound(successes: int, failures: int, *,
                          z: float = 1.96) -> float:
     """Wilson 95% upper bound on the failure-rate parameter.
@@ -758,13 +747,27 @@ class ModelScorecard:
                     # file, which stays stable across this rename;
                     # other processes block on the same .lock until
                     # we exit and release.
-                    save_json(self.scorecard.path, self.data)
+                    # mode=0o600 — scorecard captures model-routing info,
+                    # finding IDs, decision classes, and reasoning samples
+                    # that may incidentally include sensitive snippets.
+                    save_json(self.scorecard.path, self.data, mode=0o600)
             finally:
                 if self.lock_fh is not None:
                     try:
                         fcntl.flock(self.lock_fh.fileno(), fcntl.LOCK_UN)
-                    except OSError:
-                        pass
+                    except OSError as e:
+                        # Unlock failures are non-fatal — the fd close
+                        # below releases any kernel-held advisory lock
+                        # via close-on-fd-release semantics. Pre-fix
+                        # the bare swallow hid genuinely interesting
+                        # cases (filesystem revoked the lock,
+                        # underlying device disappeared) — log at
+                        # DEBUG so they surface under ``--verbose``
+                        # without flooding normal runs.
+                        logger.debug(
+                            "scorecard: flock unlock failed on %s: %s",
+                            self.scorecard.path, e,
+                        )
                     self.lock_fh.close()
             return False
 
