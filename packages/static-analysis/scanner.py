@@ -1075,7 +1075,7 @@ def main():
     tmp = Path(tempfile.mkdtemp(prefix="raptor_auto_"))
     repo_path = None
 
-    logger.info(f"Starting automated code security scan")
+    logger.info("Starting automated code security scan")
     logger.info(f"Repository: {args.repo}")
     logger.info(f"Policy version: {args.policy_version}")
     logger.info(f"Policy groups: {args.policy_groups}")

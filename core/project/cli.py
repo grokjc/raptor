@@ -445,7 +445,9 @@ def main():
                 if not os.isatty(0):
                     print("--edit requires an interactive terminal. Use --file or pass text directly.")
                     return
-                import shlex, tempfile, subprocess
+                import shlex
+                import tempfile
+                import subprocess
                 p = mgr.load(args.name)
                 if not p:
                     print(f"Project '{args.name}' not found.")
@@ -1106,7 +1108,7 @@ def _do_correlate(project, json_out=False):
     # --- Suggested next runs ---
     suggested = result.get("tool_gaps", {}).get("suggested_next_runs", [])
     if suggested:
-        print(f"\n  Next steps:")
+        print("\n  Next steps:")
         for cmd in suggested:
             print(f"    → {cmd}")
 

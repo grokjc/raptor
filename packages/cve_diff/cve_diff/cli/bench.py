@@ -487,7 +487,7 @@ def _render_bench_markdown(summary: _BenchSummary) -> str:
         f"| Outcome | Count | % |\n"
         f"|---|---:|---:|\n"
         + "\n".join(outcome_lines) + "\n\n"
-        f"## Diff integrity — sources + agreement\n\n"
+        "## Diff integrity — sources + agreement\n\n"
         + (("\n".join(integrity_lines) + "\n\n") if integrity_lines else
            "_(no PASSes to compare)_\n\n")
         + f"## Recovery layers — what saved CVEs\n\n"
@@ -500,7 +500,7 @@ def _render_bench_markdown(summary: _BenchSummary) -> str:
         f"| Tool | Total calls | CVEs that used it |\n"
         f"|---|---:|---:|\n"
         + ("\n".join(tool_lines) if tool_lines else "_(no tool calls recorded)_") + "\n\n"
-        f"## Failure cluster\n\n"
+        "## Failure cluster\n\n"
         + ("| CVE | Class | Error (first 200 chars) |\n"
            "|---|---|---|\n" + "\n".join(fail_lines) + "\n"
            if fail_lines else "_(none — all PASS)_\n")

@@ -249,7 +249,8 @@ def _get_or_start_dispatcher():
     try:
         from core.llm.dispatcher.auth import CredentialStore, seed_from_config
         from core.llm.dispatcher.server import LLMDispatcher
-        import uuid, atexit
+        import uuid
+        import atexit
         # CredentialStore.__init__ reads env vars. Operators who keep
         # keys in ~/.config/raptor/models.json (the documented UX the
         # startup banner advertises) need the explicit seed pass —

@@ -140,7 +140,7 @@ def _fetch_index_cached(
         import yaml          # type: ignore[import-untyped]
     except ImportError as exc:
         raise UpstreamLookupError(
-            f"PyYAML not installed; cannot parse Helm index"
+            "PyYAML not installed; cannot parse Helm index"
         ) from exc
     try:
         # ``CSafeLoader`` is faster + immune to the same arbitrary-

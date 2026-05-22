@@ -639,8 +639,8 @@ def orchestrate(
             )
             if not accept_weakened_defenses:
                 print(f"\n  Envelope probe failed for {model_label}: {_fail_summary}")
-                print(f"  The model cannot honour the defense envelope — aborting.")
-                print(f"  To proceed with weakened defenses, re-run with --accept-weakened-defenses")
+                print("  The model cannot honour the defense envelope — aborting.")
+                print("  To proceed with weakened defenses, re-run with --accept-weakened-defenses")
                 return None
             from core.security.rule_of_two import (
                 NonInteractiveError, require_interactive_for_weakened_defenses,
@@ -663,10 +663,10 @@ def orchestrate(
                     _fmname, _ferr,
                 )
             print(f"\n  *** DEFENSE WARNING: envelope probe failed for {model_label} ***")
-            print(f"  Running with reduced defences (--accept-weakened-defenses)")
+            print("  Running with reduced defences (--accept-weakened-defenses)")
             print(f"  Reason: {_fail_summary}")
-            print(f"  Model-independent floor still applies (autofetch redaction,"
-                  f" control-char sanitisation, role separation)\n")
+            print("  Model-independent floor still applies (autofetch redaction,"
+                  " control-char sanitisation, role separation)\n")
 
     # --- Per-finding analysis ---
     results_by_id = {}

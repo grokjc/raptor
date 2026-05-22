@@ -394,7 +394,8 @@ class TestE2EPathHijackDefeated(unittest.TestCase):
             self.skipTest("User namespaces not available")
 
     def test_path_hijack_defeated(self):
-        import os, tempfile
+        import os
+        import tempfile
         from core.sandbox import state as s
         saved_unshare = s._unshare_path_cache
         saved_prlimit = s._prlimit_path_cache
@@ -943,7 +944,8 @@ class TestE2EEgressProxy(unittest.TestCase):
         into operator terminal output — colour flips, title changes,
         cursor moves that forge prior log lines.
         """
-        import logging, io
+        import logging
+        import io
         handler_buf = io.StringIO()
         handler = logging.StreamHandler(handler_buf)
         handler.setLevel(logging.DEBUG)
@@ -976,7 +978,9 @@ class TestE2EEgressProxy(unittest.TestCase):
         otherwise inject ESC into the logger via `_interpret_result`.
         Fix is a printable-char filter; this pins it.
         """
-        import logging, io, subprocess
+        import logging
+        import io
+        import subprocess
         from core.sandbox.observe import _interpret_result
 
         handler_buf = io.StringIO()
