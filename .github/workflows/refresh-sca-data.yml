@@ -124,19 +124,13 @@ jobs:
           BODY=$(cat <<'EOF'
           Auto-PR from `.github/workflows/refresh-sca-data.yml`.
 
-          The bundled `packages/sca/data/popular/<eco>.json` lists
-          drive `/sca`'s typosquat detector. Refreshed weekly so a
-          newly-popular package becomes typosquat-detectable
-          without waiting for a code release.
+          The bundled `packages/sca/data/popular/<eco>.json` lists drive `/sca`'s typosquat detector. Refreshed weekly so a newly-popular package becomes typosquat-detectable without waiting for a code release.
 
-          **What changed:** see the diff. The refresh script is
-          idempotent — when upstream is unchanged, no PR opens.
+          **What changed:** see the diff. The refresh script is idempotent — when upstream is unchanged, no PR opens.
 
           **Reviewer checklist:**
-          - The diff is additive or shifts ranking; new entries
-            are real package names (no garbage).
-          - No ecosystem suddenly emptied (would silently disarm
-            the detector).
+          - The diff is additive or shifts ranking; new entries are real package names (no garbage).
+          - No ecosystem suddenly emptied (would silently disarm the detector).
           - Tests pass.
           EOF
           )

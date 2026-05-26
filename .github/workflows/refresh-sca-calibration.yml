@@ -166,9 +166,7 @@ jobs:
             cat <<'EOF'
           Auto-PR from `.github/workflows/refresh-sca-calibration.yml`.
 
-          Refreshes the bundled `packages/sca/data/calibration/`
-          ground-truth signals used to validate the
-          `raptor_risk_estimate` weights in `packages/sca/risk.py`.
+          Refreshes the bundled `packages/sca/data/calibration/` ground-truth signals used to validate the `raptor_risk_estimate` weights in `packages/sca/risk.py`.
 
           ## Per-source status
 
@@ -180,11 +178,7 @@ jobs:
 
           ## License compliance
 
-          All Tier 1 sources (KEV, EPSS) are MIT-redistribution
-          compatible and ship verbatim with per-file `_source`
-          attribution blocks. The license-compliance check runs
-          in CI and rejects any forbidden field names that would
-          indicate license-restricted content.
+          All Tier 1 sources (KEV, EPSS) are MIT-redistribution compatible and ship verbatim with per-file `_source` attribution blocks. The license-compliance check runs in CI and rejects any forbidden field names that would indicate license-restricted content.
 
           ## Review checklist
 
