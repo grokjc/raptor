@@ -284,7 +284,7 @@ def _archive_url(dep: Dependency) -> Optional[str]:
         return template.format(
             group_path=group_path, artifact=artifact, version=version,
         )
-    if dep.ecosystem == "Composer":
+    if dep.ecosystem == "Packagist":
         return template.format(name_lower=name.lower())
     return template.format(name=name, version=version)
 
