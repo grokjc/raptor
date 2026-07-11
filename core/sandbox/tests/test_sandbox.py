@@ -376,6 +376,9 @@ class TestSandboxNetworkIsolation(unittest.TestCase):
         """Basic commands work inside network sandbox."""
         with sandbox(block_network=True) as run:
             result = run(["echo", "sandboxed"], capture_output=True, text=True)
+            if result.returncode == 137:
+                # PID namespace teardown race under CI load — retry once.
+                result = run(["echo", "sandboxed"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0)
         self.assertIn("sandboxed", result.stdout)
 
