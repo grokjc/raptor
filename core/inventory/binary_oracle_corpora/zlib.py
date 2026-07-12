@@ -121,7 +121,11 @@ def _build_fresh(sha_dir: Path, build_o0: Path, build_o2: Path) -> None:
     ]:
         if build_dir.exists():
             shutil.rmtree(build_dir)
-        shutil.copytree(src, build_dir)
+        build_dir.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            ["cp", "-a", f"{src}/.", str(build_dir)],
+            check=True, timeout=120,
+        )
         env = {**os.environ, "CFLAGS": cflags, "LDFLAGS": ldflags}
         subprocess.run(["./configure", "--static"], cwd=build_dir,
                        env=env, check=True, timeout=120)
