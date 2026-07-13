@@ -390,18 +390,18 @@ def _configure_logging(
         level=min(level, logging.DEBUG) if log_dir else level,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
-if log_dir:
-    root = logging.getLogger()
-    root.setLevel(logging.DEBUG)
-    fh = logging.FileHandler(log_dir / "debug.log", encoding="utf-8")
-    fh.setLevel(logging.DEBUG)
-    fh.setFormatter(logging.Formatter(
-        "%(asctime)s %(levelname)s %(name)s: %(message)s",
-    ))
-    root.addHandler(fh)
-    for h in root.handlers:
-        if isinstance(h, logging.StreamHandler) and h is not fh:
-            h.setLevel(level)
+    if log_dir:
+        root = logging.getLogger()
+        root.setLevel(logging.DEBUG)
+        fh = logging.FileHandler(log_dir / "debug.log", encoding="utf-8")
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(logging.Formatter(
+            "%(asctime)s %(levelname)s %(name)s: %(message)s",
+        ))
+        root.addHandler(fh)
+        for h in root.handlers:
+            if isinstance(h, logging.StreamHandler) and h is not fh:
+                h.setLevel(level)
 
 
 def _resolve_output_dir(
