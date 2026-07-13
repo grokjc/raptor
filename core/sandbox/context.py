@@ -2542,6 +2542,7 @@ def run_untrusted(cmd: List[str], *, target: str = None, output: str = None,
                   limits: dict = None,
                   restrict_reads: bool = True,
                   readable_paths: list = None,
+                  writable_paths: list = None,
                   fake_home: bool = True,
                   **kwargs) -> subprocess.CompletedProcess:
     """Run a command whose input is attacker-derived or otherwise untrusted.
@@ -2647,6 +2648,7 @@ def run_untrusted(cmd: List[str], *, target: str = None, output: str = None,
                limits=limits,
                restrict_reads=restrict_reads,
                readable_paths=readable_paths,
+               writable_paths=writable_paths,
                fake_home=fake_home,
                strict_env=True,
                **kwargs)
@@ -2661,6 +2663,7 @@ def run_untrusted_networked(
     limits: dict = None,
     restrict_reads: bool = True,
     readable_paths: list = None,
+    writable_paths: list = None,
     fake_home: bool = False,
     **kwargs,
 ) -> subprocess.CompletedProcess:
@@ -2736,6 +2739,7 @@ def run_untrusted_networked(
         limits=limits,
         restrict_reads=restrict_reads,
         readable_paths=readable_paths,
+        writable_paths=writable_paths,
         fake_home=fake_home,
         use_egress_proxy=True,
         proxy_hosts=list(proxy_hosts),
