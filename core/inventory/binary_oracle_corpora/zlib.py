@@ -111,6 +111,7 @@ def _build_fresh(sha_dir: Path, build_o0: Path, build_o2: Path) -> None:
         safe_git_command("-C", str(src), "checkout", "FETCH_HEAD"),
         env=get_safe_git_env(), check=True, timeout=60,
     )
+    shutil.rmtree(src / ".git", ignore_errors=True)
 
     for build_dir, cflags, ldflags, run_tests in [
         (build_o0,
