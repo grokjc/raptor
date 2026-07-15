@@ -13,6 +13,8 @@ Pins the contract two consumers rely on
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from core.atomic_fs import write_text_atomically
@@ -262,4 +264,48 @@ class TestAdversarial:
         # itself has no meaningful mode to preserve).
         assert sym.stat().st_mode & 0o777 == 0o644
 
+
+class TestCrossConsumerConsistency:
+    """Consumers pass content through the same primitive."""
+
+    def test_annotations_writes_via_shared_helper(
+        self, tmp_path, monkeypatch,
+    ):
+        """core/annotations/storage.py's write_annotation should go
+        through write_text_atomically — verify by patching the shared
+        helper and confirming it's called with a path inside tmp_path."""
+        from core.annotations import storage as _storage
+        from core.annotations.storage import write_annotation
+        from core.annotations.models import Annotation
+
+        seen = []
+        import core.atomic_fs as atomic_fs
+        real = atomic_fs.write_text_atomically
+
+        def spy(path, content, **kwargs):
+            seen.append(("annotations", Path(path)))
+            return real(path, content, **kwargs)
+
+        # storage.py binds ``write_text_atomically`` at module load,
+        # so patch BOTH the source module attribute AND the resolved
+        # binding in storage.py's namespace — otherwise the storage
+        # module keeps calling the original.
+        monkeypatch.setattr(atomic_fs, "write_text_atomically", spy)
+        monkeypatch.setattr(_storage, "write_text_atomically", spy)
+        ann = Annotation(
+            file="foo/bar.py",
+            function="baz",
+            metadata={"source": "human", "status": "clean"},
+            body="test note",
+        )
+        write_annotation(tmp_path, ann)
+        # Spy fired at least once, and every recorded write landed
+        # under tmp_path. Weak "any(kind == 'annotations')" wouldn't
+        # catch a bug where write_annotation routed elsewhere and the
+        # spy was called for an unrelated reason.
+        assert len(seen) >= 1
+        assert all(
+            tmp_path in p.parents or p == tmp_path
+            for _, p in seen
+        )
 

@@ -257,8 +257,7 @@ def _is_retryable_error(error: Exception) -> bool:
 
     # Check error message for retryable patterns
     error_str = str(error).lower()
-    retryable_patterns = ("timeout", "connection", "disconnected",
-                          "502", "503", "504",
+    retryable_patterns = ("timeout", "connection", "502", "503", "504",
                           "internal server error", "service unavailable")
     if any(p in error_str for p in retryable_patterns):
         return True
@@ -896,7 +895,9 @@ class LLMClient:
                 # emission in that case. Operator runs (pytest not in
                 # sys.modules) still see zero-cost lines so a cache-
                 # only replay is visibly distinct from a non-firing
-                # command.
+                # command. Paid calls under pytest STILL emit — they
+                # indicate a live-API leak the operator wants to see
+                # (e.g. an unstubbed pipeline test hitting Gemini).
                 #
                 # ``"pytest" in sys.modules`` (not
                 # ``PYTEST_CURRENT_TEST``) because most of these flushes
