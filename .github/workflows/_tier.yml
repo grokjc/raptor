@@ -73,11 +73,26 @@ jobs:
         with:
           persist-credentials: false
       - name: Reconcile deps
-        # No-op unless this PR changed requirements*.txt before the image
-        # rebuilt on main; then installs only the delta.
-        run: pip install --no-cache-dir -r requirements-dev.txt
+        # Skip if the image's baked requirements match the checkout.
+        # pip must resolve every package to verify satisfaction (~10-15s);
+        # the hash check short-circuits that on the common path.
+        run: |
+          if [ -f /etc/raptor-ci-deps.hash ] && \
+             sha256sum -c /etc/raptor-ci-deps.hash --status; then
+            echo "Image deps match checkout — skipping reconcile"
+          else
+            echo "Hash mismatch or missing — running pip install"
+            pip install --no-cache-dir -r requirements-dev.txt
+          fi
       - name: Run tests
-        run: python -m pytest ${{ inputs.test_path }} ${{ inputs.pytest_args }}
+        env:
+          TEST_PATH: ${{ inputs.test_path }}
+          PYTEST_EXTRA: ${{ inputs.pytest_args }}
+          PYTEST_ADDOPTS: "-o faulthandler_timeout=120"
+          RAPTOR_MAX_TEST_SECONDS: "10"
+        run: |
+          set -f  # word-split $PYTEST_EXTRA without glob expansion
+          python -m pytest $TEST_PATH $PYTEST_EXTRA
 
   # Fallback path: fork PRs can't pull the private image, so install into
   # the runner's system Python (uv's cache keyed on requirements*.txt).
@@ -105,4 +120,11 @@ jobs:
         # matching the image path's "system Python, no venv" model.
         run: uv pip install --system -r requirements-dev.txt
       - name: Run tests
-        run: python -m pytest ${{ inputs.test_path }} ${{ inputs.pytest_args }}
+        env:
+          TEST_PATH: ${{ inputs.test_path }}
+          PYTEST_EXTRA: ${{ inputs.pytest_args }}
+          PYTEST_ADDOPTS: "-o faulthandler_timeout=120"
+          RAPTOR_MAX_TEST_SECONDS: "10"
+        run: |
+          set -f  # word-split $PYTEST_EXTRA without glob expansion
+          python -m pytest $TEST_PATH $PYTEST_EXTRA
