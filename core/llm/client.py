@@ -257,7 +257,8 @@ def _is_retryable_error(error: Exception) -> bool:
 
     # Check error message for retryable patterns
     error_str = str(error).lower()
-    retryable_patterns = ("timeout", "connection", "502", "503", "504",
+    retryable_patterns = ("timeout", "connection", "disconnected",
+                          "502", "503", "504",
                           "internal server error", "service unavailable")
     if any(p in error_str for p in retryable_patterns):
         return True
