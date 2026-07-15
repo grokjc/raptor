@@ -1176,6 +1176,20 @@ def sandbox(block_network=_UNSET, target: str = None, output: str = None,
         # get_safe_env path (see core/config.py); the caller path
         # is "you know what you're doing".
         strict_env = kwargs.pop("strict_env", False)
+        # ``env_caller_filtered``: opt-in assertion from the caller
+        # that the env dict was constructed from a get_safe_env-
+        # equivalent base AND that any DANGEROUS_ENV_VARS present
+        # are INTENTIONAL caller overrides (not operator-secret
+        # leakage). Suppresses the operational-hygiene warning
+        # below. ``strict_env=True`` is still preferable when the
+        # caller's intent is "neutralise a few keys on top of a
+        # base I trust" — but callers that INTENTIONALLY inject
+        # DANGEROUS_ENV_VARS as primitives (e.g. LD_PRELOAD /
+        # LD_LIBRARY_PATH for a controlled scenario) would have
+        # those stripped by ``strict_env=True``.
+        # ``env_caller_filtered=True`` is the "I know what I'm
+        # doing AND I can't use strict_env" escape valve.
+        env_caller_filtered = kwargs.pop("env_caller_filtered", False)
         _skip_pid_ns = kwargs.pop("skip_pid_ns", False)
         _skip_mount_ns = kwargs.pop("skip_mount_ns", False)
         _inherit_netns = kwargs.pop("inherit_netns", False)
@@ -1194,24 +1208,24 @@ def sandbox(block_network=_UNSET, target: str = None, output: str = None,
             # doesn't quietly wave through ``EDITOR`` / ``PAGER`` /
             # ``BROWSER`` from an attacker-influenced parent.
             #
-            # Gate on ``not strict_env``: ``strict_env=True`` is the
-            # safe-rebound form (applied below) where the caller has
-            # explicitly asked us to strip DANGEROUS_ENV_VARS from
-            # their env. Once they've opted into that, the warning is
-            # contradictory noise — the warning literally tells them
-            # to pass ``strict_env=True`` as the fix. Operator on PR
-            # #777 surfaced this firing ~12× per scan run from the
-            # semgrep path; the path passes a ``get_safe_env()``-
-            # derived env (already DANGEROUS-stripped) plus a few
-            # explicit overrides, exactly the "I know what I'm doing"
-            # case the gate is meant to silence.
-            if not strict_env:
+            # Gate on ``not strict_env`` AND ``not env_caller_filtered``:
+            # either flag is a caller-side assertion that the warning
+            # is contradictory noise — the warning literally tells the
+            # caller to pass ``strict_env=True`` as the fix.
+            # ``env_caller_filtered`` covers the case (engine
+            # local_lowpriv_shell, semgrep config-merger, etc.) where
+            # the caller has built the env from get_safe_env()
+            # upstream AND deliberately added DANGEROUS_ENV_VARS as
+            # intentional primitives that ``strict_env=True`` would
+            # incorrectly strip.
+            if not strict_env and not env_caller_filtered:
                 logger.warning(
                     "Sandbox: caller supplied custom env= for "
                     "%s — get_safe_env() not applied; caller env "
                     "passed through. Pass strict_env=True to strip "
-                    "DANGEROUS_ENV_VARS from the caller env if you "
-                    "only intended to override a few keys.",
+                    "DANGEROUS_ENV_VARS from the caller env, OR "
+                    "env_caller_filtered=True to acknowledge the "
+                    "caller has already filtered upstream.",
                     " ".join(cmd[:_CMD_DISPLAY_MAX_ARGS]) or repr(cmd),
                 )
             if strict_env:
