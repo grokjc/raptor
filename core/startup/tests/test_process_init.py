@@ -41,3 +41,22 @@ def test_init_idempotent():
     init()
     init()
     assert faulthandler.is_enabled()
+
+
+def test_auto_init_on_import():
+    """Importing the module auto-enables faulthandler (the load-bearing contract)."""
+    import subprocess
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[3]
+    rc = subprocess.run(
+        [
+            sys.executable, "-c",
+            "import faulthandler; faulthandler.disable(); "
+            "import core.startup.process_init; "
+            "assert faulthandler.is_enabled(), 'auto-init did not fire'",
+        ],
+        cwd=str(repo),
+        env={**__import__("os").environ, "PYTHONPATH": str(repo)},
+    ).returncode
+    assert rc == 0
