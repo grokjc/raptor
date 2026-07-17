@@ -449,6 +449,7 @@ def discover_sinks_for_target(
             if graph.calls:
                 call_graphs[rel] = graph
         except Exception:  # noqa: BLE001
+            logger.debug("sink discovery: callgraph extraction failed for %s", rel, exc_info=True)
             continue
 
     return discover_sinks(

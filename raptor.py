@@ -576,7 +576,7 @@ def _run_with_lifecycle(command: str, script_path: Path, args: list,
                                               .get("artifactLocation", {})
                                               .get("uri", "unknown")),
                             })
-                except Exception:
+                except (OSError, KeyError, TypeError, json.JSONDecodeError):
                     continue
             if findings:
                 stored = store_scan_results(target or "", findings, {"total_findings": len(findings)})

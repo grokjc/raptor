@@ -173,7 +173,10 @@ def generate(
 ) -> List[Tuple[Finding, GroundTruth]]:
     expected = parse_expected_results(expected_results_csv)
 
-    sarif = json.loads(sarif_path.read_text())
+    try:
+        sarif = json.loads(sarif_path.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        raise RuntimeError(f"SARIF read/parse failed: {sarif_path}: {e}") from e
     runs = sarif.get("runs", [])
     if not runs:
         return []
