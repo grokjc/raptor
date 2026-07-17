@@ -253,7 +253,11 @@ def build_llm_config_from_flags(
     """
     from core.llm.config import LLMConfig, _model_config_from_entry, _get_configured_models
     from core.llm.model_data import PROVIDER_ENV_KEYS
-    from core.security.llm_family import provider_of, bare_model_id
+    from core.security.llm_family import (
+        bare_model_id,
+        provider_of,
+        resolve_model_shorthand,
+    )
 
     models = models or []
     llm_config = None
@@ -270,6 +274,35 @@ def build_llm_config_from_flags(
         # field would produce ``anthropic/anthropic/claude-haiku-4-5``
         # when downstream re-prepends the provider — the SDK ships
         # that to Anthropic which 404s as an unknown model.
+        #
+        # Shorthand pass first: bare tier tokens (``haiku`` / ``opus`` /
+        # ``sonnet``) that don't parse as a real model id resolve to a
+        # unique configured entry when possible, then re-enter the
+        # provider-lookup path with the full name. Ambiguous shorthand
+        # raises inside resolve_model_shorthand with the candidate
+        # list. Missing shorthand returns None → falls through to the
+        # existing loud-failure path unchanged.
+        if provider_of(name) == "":
+            # Pass only the canonical ``model`` field per configured
+            # entry. The ``_configured_model`` alias is deliberately
+            # excluded — including both would raise a false ambiguity
+            # error when they're just two names for the same entry
+            # (e.g. ``claude-haiku-4-5`` alias + ``claude-haiku-4-5-
+            # 20251001`` canonical, both with token "haiku"). Operators
+            # who want to select an entry by an alias-specific token
+            # can pass the alias directly — the exact-match path below
+            # handles that.
+            configured_names = [
+                cfg_entry.get("model") or ""
+                for cfg_entry in _get_configured_models()
+            ]
+            resolved = resolve_model_shorthand(name, configured_names)
+            if resolved is not None and resolved != name:
+                # Substitute the resolved full name and continue. The
+                # dated-snapshot lookup below still runs on the
+                # resolved name, so an aggregator-hosted or Bedrock-
+                # shaped configured model resolves correctly.
+                name = resolved
         provider = provider_of(name)
         bare = bare_model_id(name)
         entry: Dict[str, Any] = {"model": bare, "provider": provider, "role": role}
