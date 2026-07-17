@@ -17,6 +17,7 @@ import copy
 import logging
 import os
 import shutil
+import sys
 import threading
 import time
 from collections import Counter
@@ -330,11 +331,11 @@ def build_llm_config_from_flags(
                 # name — fail loudly with the recognizable-id hint rather
                 # than the unhelpful "Set ??? env var" path below.
                 from core.security.llm_family import unknown_model_message
-                print(f"\n  Error: {unknown_model_message(name)}")
+                print(f"\n  ✗ {unknown_model_message(name)}", file=sys.stderr)
                 return None
             env_key = PROVIDER_ENV_KEYS.get(provider, "???")
-            print(f"\n  Error: no API key for --model {name}")
-            print(f"  Set {env_key} or add the key to models.json")
+            print(f"\n  ✗ No API key for --model {name}", file=sys.stderr)
+            print(f"  Set {env_key} or add the key to models.json", file=sys.stderr)
             return None
         return mc
 

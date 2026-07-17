@@ -205,8 +205,7 @@ def _write_metadata_db(db_path: Path, harvested: list) -> None:
     """Write the harvested fixes into a fresh metadata DB.  Schema
     columns are exactly what :func:`cvefix_loader.load_pairs` needs;
     extras are deliberately omitted (don't fabricate data)."""
-    if db_path.exists():
-        db_path.unlink()
+    db_path.unlink(missing_ok=True)
     con = sqlite3.connect(db_path)
     try:
         con.executescript(_SCHEMA)

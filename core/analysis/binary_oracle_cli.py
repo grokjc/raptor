@@ -151,14 +151,17 @@ def _filter_locally_built(
             try:
                 rel = c.resolve().relative_to(repo.resolve())
             except ValueError:
-                # Candidate escapes the repo (symlink target outside);
-                # autodetect already filters these but defend in depth.
                 continue
-            proc = subprocess.run(
-                ["git", "-C", str(repo), "ls-files",
-                 "--error-unmatch", "--", str(rel)],
-                capture_output=True, text=True, check=False,
-            )
+            try:
+                proc = subprocess.run(
+                    ["git", "-C", str(repo), "ls-files",
+                     "--error-unmatch", "--", str(rel)],
+                    capture_output=True, text=True, check=False,
+                    timeout=10,
+                )
+            except subprocess.TimeoutExpired:
+                repo_committed.append(c)
+                continue
             if proc.returncode == 0:
                 repo_committed.append(c)
             elif proc.returncode == 1:

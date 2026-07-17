@@ -938,13 +938,13 @@ def cmd_tool_evidence(args: argparse.Namespace) -> int:
     try:
         analysis = _json.loads(Path(args.analysis).read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
-        print(f"error: cannot read analysis report {args.analysis!r}: {e}",
+        print(f"✗ Cannot read analysis report {args.analysis!r}: {e}",
               file=sys.stderr)
         return 2
     try:
         validation = _json.loads(Path(args.validation).read_text(encoding="utf-8"))
     except (OSError, ValueError) as e:
-        print(f"error: cannot read validation report {args.validation!r}: {e}",
+        print(f"✗ Cannot read validation report {args.validation!r}: {e}",
               file=sys.stderr)
         return 2
 

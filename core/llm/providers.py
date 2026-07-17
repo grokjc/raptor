@@ -702,7 +702,8 @@ def _normalize_schema(schema: Dict[str, Any]) -> Dict[str, Any]:
             continue
 
         field_desc_str = str(field_desc)
-        field_type = field_desc_str.split()[0].strip()
+        parts = field_desc_str.split()
+        field_type = parts[0].strip() if parts else "string"
         field_type = type_aliases.get(field_type, field_type)
 
         # Detect nullable: "string or null", "float or null"

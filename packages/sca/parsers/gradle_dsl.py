@@ -128,7 +128,7 @@ def parse(path: Path) -> List[Dependency]:
     """Parse a Gradle build script and emit one Dependency per
     recognised dependency declaration."""
     try:
-        text = path.read_text(encoding="utf-8")
+        text = path.read_text(encoding="utf-8", errors="replace")
     except OSError as e:
         logger.warning("sca.parsers.gradle_dsl: %s: %s", path, e)
         return []

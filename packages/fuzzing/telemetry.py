@@ -214,6 +214,13 @@ class FuzzingTelemetry:
         self._announced_first_path = False
         self._plateau_announced = False
 
+    def __del__(self) -> None:
+        if self._events_fp:
+            try:
+                self._events_fp.close()
+            except Exception:
+                pass
+
     def start(self) -> None:
         with self._lock:
             self.stats.started = time.time()

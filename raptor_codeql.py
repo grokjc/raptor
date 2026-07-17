@@ -222,7 +222,7 @@ def run_autonomous_workflow(args):
                         else:
                             logger.info("  ⚠ Exploit failed to compile")
                 else:
-                    logger.info("❌ Not exploitable")
+                    logger.info("✗ Not exploitable")
 
             except Exception as e:
                 logger.error(f"Analysis failed: {e}", exc_info=True)
@@ -419,7 +419,7 @@ Examples:
         sys.exit(SANDBOX_ENGAGE_EXIT_CODE)
     except Exception as e:
         logger.error(f"Fatal error: {e}", exc_info=True)
-        print(f"\n✗ Fatal error: {e}")
+        print(f"\n✗ Fatal error: {e}", file=sys.stderr)
         sys.exit(1)
 
 

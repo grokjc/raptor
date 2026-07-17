@@ -443,7 +443,10 @@ def _count_sarif_results(sarif_path: Path, target_uri: Optional[str] = None,
     (a file with N unrelated findings shouldn't make a correct single-flow
     barrier look unsound). The preserve check stays file-scoped (the pre-fix vuln
     sits at a different line after the patch's line shifts)."""
-    data = json.loads(Path(sarif_path).read_text())
+    try:
+        data = json.loads(Path(sarif_path).read_text())
+    except (OSError, json.JSONDecodeError):
+        return 0
     if target_uri is None:
         return sum(len(r.get("results", [])) for r in data.get("runs", []))
     n = 0

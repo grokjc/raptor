@@ -13,7 +13,7 @@ Usage:
     raptor.py <mode> [options]
 
 Available Modes:
-    scan        - Static code analysis (Semgrep + CodeQL)
+    scan        - Static code analysis with Semgrep
     sca         - Software Composition Analysis (deps + advisories + SBOM)
     binary      - Black-box binary investigation and evidence collection
     fuzz        - Binary fuzzing with AFL++
@@ -21,7 +21,7 @@ Available Modes:
     agentic     - Full autonomous workflow (Semgrep + CodeQL + LLM analysis)
     codeql      - CodeQL-only analysis
     analyze     - LLM-powered vulnerability analysis (requires SARIF input)
-    describe    - Describe target structure and entry points
+    describe    - Pre-flight inspection: target type, tool readiness, cost estimate
     doctor      - Status report for local setup (no claude needed)
     frida       - Dynamic instrumentation via Frida (alpha)
     help        - Show detailed help for a specific mode
@@ -674,10 +674,7 @@ def _get_or_start_dispatcher():
         msg = (
             f"raptor.py: credential-isolation dispatcher failed to "
             f"start ({type(exc).__name__}: {exc}). Falling back to "
-            f"env-direct credential propagation. Once Phase C "
-            f"activation lands, this fallback will produce workers "
-            f"without LLM auth — fix the dispatcher startup failure "
-            f"or expect script-level auth errors."
+            f"env-direct credential propagation."
         )
         _sys.stderr.write(msg + "\n")
         _sys.stderr.flush()
@@ -813,7 +810,7 @@ def mode_sca(args: list) -> int:
     script_root = Path(__file__).parent
     sca_shim = script_root / "libexec" / "raptor-sca-run"
     if not sca_shim.exists():
-        print(f"✗ SCA shim not found: {sca_shim}")
+        print(f"✗ SCA module not found: {sca_shim}", file=sys.stderr)
         return 1
 
     # Translate ``--repo <p>`` into the positional target the shim
@@ -871,7 +868,7 @@ def mode_sca(args: list) -> int:
         print("\n\nInterrupted by user")
         return 130
     except Exception as e:
-        print(f"\n✗ Error running raptor-sca: {e}")
+        print(f"\n✗ Error running raptor-sca: {e}", file=sys.stderr)
         return 1
 
 
@@ -1088,7 +1085,7 @@ def mode_frida(args: list) -> int:
     script_root = Path(__file__).parent
     wrapper = script_root / "libexec" / "raptor-frida"
     if not wrapper.exists():
-        print(f"✗ Frida wrapper not found: {wrapper}")
+        print(f"✗ Frida wrapper not found: {wrapper}", file=sys.stderr)
         return 1
     env = RaptorConfig.get_safe_env()
     env.setdefault("_RAPTOR_TRUSTED", "1")
@@ -1131,8 +1128,19 @@ def show_mode_help(mode: str, preamble: bool = True) -> None:
     mode_scripts = _mode_help_scripts()
 
     if mode not in mode_scripts:
-        print(f"✗ Unknown mode: {mode}", file=sys.stderr)
-        print(f"Available modes: {', '.join(mode_scripts.keys())}")
+        all_modes = set(mode_scripts.keys()) | {'describe', 'doctor', 'sca', 'frida'}
+        if mode not in all_modes:
+            print(f"✗ Unknown mode: {mode}", file=sys.stderr)
+            print(f"Available modes: {', '.join(sorted(all_modes))}", file=sys.stderr)
+            return
+        print(f"\n[*] Help for mode: {mode}\n", flush=True)
+        mode_handlers = {
+            'describe': mode_describe,
+            'doctor': mode_doctor,
+            'sca': mode_sca,
+            'frida': mode_frida,
+        }
+        mode_handlers[mode](["--help"])
         return
 
     script_path = mode_scripts[mode]
@@ -1182,6 +1190,7 @@ Available Modes:
   agentic     - Full autonomous workflow (Semgrep + CodeQL + LLM analysis)
   codeql      - CodeQL-only analysis
   analyze     - LLM-powered vulnerability analysis (requires SARIF input)
+  describe    - Pre-flight inspection: target type, tool readiness, cost estimate
   doctor      - Status report for local setup (no claude needed)
   frida       - Dynamic instrumentation via Frida (alpha)
 
@@ -1373,7 +1382,7 @@ if __name__ == "__main__":
         print("\n\nInterrupted by user")
         sys.exit(130)
     except Exception as e:
-        print(f"\n✗ Fatal error: {e}")
+        print(f"\n✗ Fatal error: {e}", file=sys.stderr)
         import traceback
-        traceback.print_exc()
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)

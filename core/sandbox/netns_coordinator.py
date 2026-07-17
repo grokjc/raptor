@@ -294,7 +294,10 @@ def _run_child(role: str, spec: Dict[str, Any], result: _ChildResult) -> None:
 
     cmd = spec["cmd"]
     env = spec.get("env", {})
-    timeout = float(spec.get("timeout_s", 10.0))
+    try:
+        timeout = float(spec.get("timeout_s", 10.0))
+    except (TypeError, ValueError):
+        timeout = 10.0
     profile = spec.get("profile", "target_run")
     block_network = bool(spec.get("block_network", True))
     allowed_tcp_ports = spec.get("allowed_tcp_ports") or None

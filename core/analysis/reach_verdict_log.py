@@ -241,11 +241,9 @@ def reset(path: Optional[Path] = None) -> None:
     with _LOCK:
         _IN_MEMORY.clear()
     p = path or _sidecar_path()
-    if p.exists():
-        p.unlink()
+    p.unlink(missing_ok=True)
     lock_path = p.with_suffix(p.suffix + ".lock")
-    if lock_path.exists():
-        lock_path.unlink()
+    lock_path.unlink(missing_ok=True)
 
 
 def _clear_after_fork_in_child() -> None:

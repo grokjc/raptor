@@ -328,7 +328,7 @@ def main():
         logger.warning("Scan interrupted by user")
         return 130
     except Exception as e:
-        print(f"\n❌ Scan failed: {e}")
+        print(f"\n✗ Scan failed: {e}", file=sys.stderr)
         logger.error(f"Scan failed: {e}", exc_info=True)
         return 1
 

@@ -60,7 +60,7 @@ def main():
             target_path = Path(sys.argv[idx + 1]).resolve()
 
     if not Path(binary_path).exists():
-        print(f"ERROR: binary not found: {binary_path}")
+        print(f"✗ binary not found: {binary_path}", file=sys.stderr)
         sys.exit(1)
 
     # Acquire an advisory flock on findings.json before the

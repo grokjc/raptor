@@ -1205,7 +1205,7 @@ class AutonomousCodeQLAnalyzer:
                     self.logger.warning(f"Failed to generate visualizations: {e}")
 
             if dataflow_validation and not dataflow_validation.is_exploitable:
-                self.logger.info("❌ Dataflow not exploitable - skipping exploit generation")
+                self.logger.info("✗ Dataflow not exploitable - skipping exploit generation")
                 return AutonomousAnalysisResult(
                     finding=finding,
                     analysis=None,
@@ -1229,7 +1229,7 @@ class AutonomousCodeQLAnalyzer:
         )
 
         if not analysis.is_exploitable:
-            self.logger.info("❌ Not exploitable - skipping exploit generation")
+            self.logger.info("✗ Not exploitable - skipping exploit generation")
             return AutonomousAnalysisResult(
                 finding=finding,
                 analysis=analysis,

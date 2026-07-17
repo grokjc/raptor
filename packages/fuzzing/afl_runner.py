@@ -241,7 +241,7 @@ class AFLRunner:
                 
                 # If afl-fuzz --help fails with shmget error, the system needs configuration
                 if "shmget" in result.stderr or "No space left on device" in result.stderr:
-                    logger.error("❌ AFL shared memory configuration issue detected!")
+                    logger.error("✗ AFL shared memory configuration issue detected!")
                     logger.error("   On macOS, AFL requires higher shared memory limits.")
                     logger.error("   Run the following commands:")
                     logger.error("   1. afl-system-config (as root/sudo)")
