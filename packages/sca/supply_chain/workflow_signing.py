@@ -239,9 +239,11 @@ def _git_log_signatures(
     cmd.extend(paths)
     try:
         from core.config import RaptorConfig
+        from core.sandbox.preexec import set_pdeathsig
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=30,
             check=False, env=RaptorConfig.get_safe_env(),
+            preexec_fn=set_pdeathsig(),
         )
     except (OSError, subprocess.TimeoutExpired) as e:
         logger.debug(

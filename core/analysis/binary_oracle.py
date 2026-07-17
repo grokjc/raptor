@@ -127,11 +127,13 @@ def _stream(argv: List[str], timeout: int) -> Iterator[str]:
     yields nothing — same swallow-and-degrade contract as ``_run``.
     """
     from core.config import RaptorConfig
+    from core.sandbox.preexec import set_pdeathsig
     deadline = time.monotonic() + timeout
     try:
         proc = subprocess.Popen(
             argv, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, bufsize=1, env=RaptorConfig.get_safe_env(),
+            preexec_fn=set_pdeathsig(),
         )
     except OSError as e:
         logger.debug("binary_oracle: %s failed to start: %s", argv[0], e)

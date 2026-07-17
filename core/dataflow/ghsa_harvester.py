@@ -150,26 +150,28 @@ def _resolve_parent(repo_url: str, fix_hash: str, timeout: int = 60) -> Optional
     with tempfile.TemporaryDirectory(prefix="ghsa-resolve-") as td:
         td_p = Path(td)
         from core.config import RaptorConfig
+        from core.sandbox.preexec import set_pdeathsig
         _env = RaptorConfig.get_safe_env()
+        _pds = set_pdeathsig()
         try:
             subprocess.run(["git", "init", "-q", str(td_p)],
                            check=True, timeout=15, capture_output=True,
-                           env=_env)
+                           env=_env, preexec_fn=_pds)
             subprocess.run(["git", "-C", str(td_p), "remote", "add", "origin", repo_url],
                            check=True, timeout=15, capture_output=True,
-                           env=_env)
+                           env=_env, preexec_fn=_pds)
             r = subprocess.run(
                 ["git", "-C", str(td_p), "fetch", "-q", "--depth", "2",
                  "origin", fix_hash],
                 check=False, timeout=timeout, capture_output=True,
-                env=_env,
+                env=_env, preexec_fn=_pds,
             )
             if r.returncode != 0:
                 return None
             r = subprocess.run(
                 ["git", "-C", str(td_p), "rev-list", "--parents", "-n", "1", fix_hash],
                 check=False, timeout=15, capture_output=True, text=True,
-                env=_env,
+                env=_env, preexec_fn=_pds,
             )
             if r.returncode != 0:
                 return None

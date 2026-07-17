@@ -292,10 +292,11 @@ def _has_dwarf(path: Path) -> bool:
     """
     try:
         from core.config import RaptorConfig
+        from core.sandbox.preexec import set_pdeathsig
         out = subprocess.run(
             ["readelf", "-S", str(path)],
             capture_output=True, text=True, check=False, timeout=10,
-            env=RaptorConfig.get_safe_env(),
+            env=RaptorConfig.get_safe_env(), preexec_fn=set_pdeathsig(),
         )
     except (OSError, subprocess.TimeoutExpired) as e:
         logger.debug("binary_oracle_autodetect: readelf -S failed on %s: %s",
