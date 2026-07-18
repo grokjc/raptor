@@ -851,11 +851,11 @@ class AutonomousSecurityAgentV2:
                     logger.info(f"      Purpose: {san_detail.get('purpose')}")
                     logger.info(f"      Bypassable: {san_detail.get('bypass_possible')}")
                     if san_detail.get('bypass_method'):
-                        logger.info(f"      Bypass: {san_detail.get('bypass_method')[:100]}")
+                        logger.info(f"      Bypass: {(san_detail.get('bypass_method') or '')[:100]}")
 
             if validation.get('attack_payload_concept'):
                 logger.info("\n  Attack Payload Concept:")
-                logger.info(f"    {validation.get('attack_payload_concept')[:200]}")
+                logger.info(f"    {(validation.get('attack_payload_concept') or '')[:200]}")
 
             # Save validation details
             validation_file = self.out_dir / "validation" / f"{vuln.finding_id}_validation.json"
@@ -1020,7 +1020,7 @@ class AutonomousSecurityAgentV2:
 
             logger.info(f"\n  Reasoning: {(analysis.get('reasoning') or '')[:150]}...")
             if analysis.get('attack_scenario'):
-                logger.info(f"  Attack Scenario: {analysis.get('attack_scenario')[:150]}...")
+                logger.info(f"  Attack Scenario: {(analysis.get('attack_scenario') or '')[:150]}...")
 
             # Deep dataflow validation for high-confidence findings
             if vuln.has_dataflow and vuln.exploitable:

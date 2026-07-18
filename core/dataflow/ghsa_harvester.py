@@ -98,7 +98,7 @@ def _iter_advisories(
             continue
         for jp in ydir.rglob("*.json"):
             try:
-                adv = json.loads(jp.read_text())
+                adv = json.loads(jp.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError, UnicodeDecodeError):
                 continue
             adv_cwes = set(adv.get("database_specific", {}).get("cwe_ids", []))

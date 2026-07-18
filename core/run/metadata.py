@@ -70,7 +70,7 @@ def _find_claude_ancestor() -> Optional[int]:
     for _ in range(20):
         try:
             pid = os.getppid() if pid == os.getpid() else _read_ppid(pid)
-        except (OSError, ValueError):
+        except (OSError, ValueError, IndexError):
             return None
         if pid <= 1:
             return None

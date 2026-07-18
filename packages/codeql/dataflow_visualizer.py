@@ -195,7 +195,7 @@ class DataflowVisualizer:
             sanitizers=dataflow.sanitizers
         )
 
-        with open(output_file, 'w') as f:
+        with open(output_file, 'w', encoding='utf-8') as f:
             f.write(html_content)
 
         return output_file
@@ -672,7 +672,7 @@ class DataflowVisualizer:
             for san in dataflow.sanitizers:
                 lines.append(f"- {san}")
 
-        with open(output_file, 'w') as f:
+        with open(output_file, 'w', encoding='utf-8') as f:
             f.write('\n'.join(lines))
 
         return output_file
@@ -777,7 +777,7 @@ class DataflowVisualizer:
         lines.append("=" * 80)
         lines.append("")
 
-        with open(output_file, 'w') as f:
+        with open(output_file, 'w', encoding='utf-8') as f:
             f.write('\n'.join(lines))
 
         # Also print to logger for terminal viewing
@@ -836,7 +836,7 @@ class DataflowVisualizer:
 
         lines.append("}")
 
-        with open(output_file, 'w') as f:
+        with open(output_file, 'w', encoding='utf-8') as f:
             f.write('\n'.join(lines))
 
         # Add instructions

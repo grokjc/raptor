@@ -78,7 +78,7 @@ def _load_findings(path: Path) -> List[Dict[str, Any]]:
 
 
 def _write_findings(path: Path, findings: List[Dict[str, Any]]) -> None:
-    with open(path, "w") as fh:
+    with open(path, "w", encoding="utf-8") as fh:
         json.dump(findings, fh, indent=2, default=str)
 
 

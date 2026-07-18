@@ -334,17 +334,6 @@ def _build_standalone_pocs(target, build_dir):
 
     build_dir.mkdir(parents=True, exist_ok=True)
 
-    compiler = "gcc"
-    try:
-        _sp.run([compiler, "--version"], capture_output=True, check=True)
-    except (FileNotFoundError, _sp.CalledProcessError):
-        compiler = "cc"
-        try:
-            _sp.run([compiler, "--version"], capture_output=True, check=True)
-        except (FileNotFoundError, _sp.CalledProcessError):
-            print("No C compiler found — skipping PoC build", file=sys.stderr)
-            return
-
     # Sandbox the compile invocations. Pre-fix `_sp.run(cmd)`
     # spawned the compiler with the operator's full env and no
     # filesystem isolation. Two failure modes:
@@ -376,8 +365,18 @@ def _build_standalone_pocs(target, build_dir):
         _safe_env = RaptorConfig.get_safe_env()
     except ImportError:
         _sandbox_run = None
-        import os as _os
-        _safe_env = _os.environ.copy()
+        _safe_env = os.environ.copy()
+
+    compiler = "gcc"
+    try:
+        _sp.run([compiler, "--version"], capture_output=True, check=True, env=_safe_env)
+    except (FileNotFoundError, _sp.CalledProcessError):
+        compiler = "cc"
+        try:
+            _sp.run([compiler, "--version"], capture_output=True, check=True, env=_safe_env)
+        except (FileNotFoundError, _sp.CalledProcessError):
+            print("No C compiler found — skipping PoC build", file=sys.stderr)
+            return
 
     built = 0
     for source in sources:
@@ -945,11 +944,16 @@ def _discover_executables(target):
     can't actually exec it.
     """
     import subprocess as _sp
+    try:
+        from core.config import RaptorConfig
+        _env = RaptorConfig.get_safe_env()
+    except Exception:
+        _env = os.environ.copy()
     result = {}
     try:
         proc = _sp.run(
             ["find", target, "-executable", "-type", "f"],
-            capture_output=True, text=True, timeout=30
+            capture_output=True, text=True, timeout=30, env=_env
         )
         # GNU find returns rc=0 on success; BSD find with
         # `-executable` errors out (rc!=0, stderr "find: -executable:
@@ -958,7 +962,7 @@ def _discover_executables(target):
         if proc.returncode != 0 or "unknown primary" in (proc.stderr or "").lower():
             proc = _sp.run(
                 ["find", target, "-type", "f", "-perm", "+111"],
-                capture_output=True, text=True, timeout=30
+                capture_output=True, text=True, timeout=30, env=_env
             )
         # Track collisions on stem. Pre-fix `result[p.stem] = str(p)`
         # silently OVERWROTE earlier entries when two binaries

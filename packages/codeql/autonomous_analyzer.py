@@ -1346,7 +1346,7 @@ class AutonomousCodeQLAnalyzer:
             else:
                 exploit_ext = ".py"
             exploit_file = out_dir / f"{safe_id}_exploit{exploit_ext}"
-            with open(exploit_file, 'w') as f:
+            with open(exploit_file, 'w', encoding='utf-8') as f:
                 f.write(exploit_code)
             self.logger.info(f"✓ Exploit saved: {exploit_file}")
 
