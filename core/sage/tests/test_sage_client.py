@@ -350,7 +350,8 @@ class TestSageClientWithFakeSdk(unittest.TestCase):
             client_mod._SyncSageClient = _FakeClient
             client_mod._AgentIdentity = _FakeIdentity
             client_mod._MemoryType = SimpleNamespace(
-                observation="observation", fact="fact", inference="inference"
+                observation="observation", fact="fact", inference="inference",
+                task="task",
             )
 
             from core.sage.config import SageConfig

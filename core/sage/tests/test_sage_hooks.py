@@ -401,6 +401,15 @@ class TestGetClientThreadSafety(unittest.TestCase):
         self.assertEqual(mock_instance.is_available.call_count, 1)
 
 
+    @patch("core.sage.hooks.SageConfig")
+    def test_init_exception_returns_none(self, mock_config_cls):
+        """_get_client() must never propagate exceptions to callers."""
+        import core.sage.hooks as hooks
+        mock_config_cls.from_env.side_effect = RuntimeError("bad env")
+        self.assertIsNone(hooks._get_client())
+        self.assertTrue(hooks._client_initialised)
+
+
 class TestFormatSageMemoriesForPrompt(unittest.TestCase):
     def test_empty(self):
         from core.sage.hooks import format_sage_memories_for_prompt

@@ -113,13 +113,18 @@ def _get_client() -> Optional[SageClient]:
         ):
             needs_init = True
         if needs_init:
-            config = SageConfig.from_env()
-            candidate = SageClient(config)
-            if candidate.is_available():
-                _client = candidate
-                _client_none_decided_at = 0.0
-            else:
-                logger.debug("SAGE unavailable — pipeline hooks disabled")
+            try:
+                config = SageConfig.from_env()
+                candidate = SageClient(config)
+                if candidate.is_available():
+                    _client = candidate
+                    _client_none_decided_at = 0.0
+                else:
+                    logger.debug("SAGE unavailable — pipeline hooks disabled")
+                    _client = None
+                    _client_none_decided_at = time.time()
+            except Exception as exc:
+                logger.debug("SAGE client init failed: %s", exc)
                 _client = None
                 _client_none_decided_at = time.time()
             _client_initialised = True

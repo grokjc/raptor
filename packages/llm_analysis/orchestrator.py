@@ -606,7 +606,7 @@ def orchestrate(
     if precall_path.is_file():
         try:
             precall_raw = load_json(precall_path)
-            mems = (precall_raw or {}) .get("memories") or []
+            mems = (precall_raw or {}).get("memories") or []
             from core.sage.hooks import format_sage_memories_for_prompt
             precall_txt = format_sage_memories_for_prompt(mems)
             if precall_txt:
