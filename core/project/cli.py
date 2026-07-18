@@ -1516,7 +1516,9 @@ def _print_coverage(project, detailed=False, fail_under=None):
     base = Path(project.output_dir)
     try:
         run_dirs = list(project.get_run_dirs(sweep=False))
-    except Exception:
+    except Exception as exc:
+        import logging as _logging
+        _logging.getLogger(__name__).warning("failed to list run dirs: %s", exc)
         run_dirs = []
     checklist = load_json(base / "checklist.json")
     if not checklist:
@@ -2061,7 +2063,11 @@ def _classify_clean_coverage(project, plan):
         survivors = [d for d in project.get_run_dirs(sweep=False)
                      if d not in victim_set]
         return [classify_removal(v, survivors) for v in victims]
-    except Exception:
+    except Exception as exc:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "clean consequence computation failed: %s", exc,
+        )
         return []
 
 

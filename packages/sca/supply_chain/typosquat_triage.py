@@ -32,12 +32,15 @@ from __future__ import annotations
 import datetime
 import enum
 import json as _json
+import logging
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, List, Optional
 
 from .typosquat_audit import Candidate, _load_name_set
+
+logger = logging.getLogger(__name__)
 
 # Auto-legit floor. A name the LLM calls "legit" is only auto-filed to
 # reviewed-legit when it looks like an established independent project; a YOUNG
@@ -552,8 +555,8 @@ def osv_malicious(http, ecosystem: str, names: List[str]) -> set:
                 if any(isinstance(v, dict) and isinstance(v.get("id"), str)
                        and v["id"].startswith("MAL-") for v in vulns):
                     mal.add(n)
-    except Exception:                              # noqa: BLE001 — fail-soft
-        pass
+    except Exception as exc:                        # noqa: BLE001 — fail-soft
+        logger.warning("OSV malware advisory check failed: %s", exc)
     return mal
 
 
