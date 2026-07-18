@@ -140,7 +140,7 @@ def _finding_to_dataflow_path(finding: Finding) -> DataflowPath:
     def _step(s, label):
         return DataflowStep(
             file_path=s.file_path, line=int(s.line),
-            column=int(s.column or 1),
+            column=int(s.column) if s.column is not None else 1,
             snippet=s.snippet or "", label=label,
         )
     return DataflowPath(

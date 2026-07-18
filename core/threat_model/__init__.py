@@ -423,7 +423,7 @@ def from_context_map(project: Any, context_map: dict[str, Any]) -> ThreatModel:
     model = blank_for_project(project)
     model.source = "context-map"
     model.entry_points = _summaries_from_entries(
-        context_map.get("entry_points") or context_map.get("sources") or [],
+        context_map["entry_points"] if "entry_points" in context_map else context_map.get("sources") or [],
         default_label="entry",
     )
     model.trust_boundaries = _summaries_from_entries(
@@ -431,7 +431,7 @@ def from_context_map(project: Any, context_map: dict[str, Any]) -> ThreatModel:
         default_label="boundary",
     )
     sinks = _summaries_from_entries(
-        context_map.get("sink_details") or context_map.get("sinks") or [],
+        context_map["sink_details"] if "sink_details" in context_map else context_map.get("sinks") or [],
         default_label="sink",
     )
     model.domain_packs = _derive_domain_packs(context_map)
@@ -887,7 +887,7 @@ def lint_model(model: ThreatModel) -> list[dict[str, Any]]:
 def diff_context_map(model: ThreatModel, context_map: dict[str, Any]) -> dict[str, Any]:
     """Compare a model with a fresh ``context-map.json``."""
     fresh_entries = set(_summaries_from_entries(
-        context_map.get("entry_points") or context_map.get("sources") or [],
+        context_map["entry_points"] if "entry_points" in context_map else context_map.get("sources") or [],
         default_label="entry",
     ))
     fresh_boundaries = set(_summaries_from_entries(
@@ -1161,7 +1161,7 @@ def _vuln_classes_for_packs(packs: list[str]) -> list[str]:
 
 def _data_flows_from_context_map(context_map: dict[str, Any]) -> list[dict[str, Any]]:
     entries = context_map.get("entry_points") or []
-    sinks = context_map.get("sink_details") or context_map.get("sinks") or []
+    sinks = context_map["sink_details"] if "sink_details" in context_map else context_map.get("sinks") or []
     entries_by_id = _records_by_id(entries)
     sinks_by_id = _records_by_id(sinks)
     out: list[dict[str, Any]] = []

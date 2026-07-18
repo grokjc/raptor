@@ -270,15 +270,15 @@ def _parse_semgrep(
 
     trace = extra.get("dataflow_trace", {})
     src_line = _semgrep_extract_line(trace.get("taint_source"))
-    if not src_line:
+    if src_line is None:
         src_line = finding.get("start", {}).get("line", 0)
     sink_line = _semgrep_extract_line(trace.get("taint_sink"))
-    if not sink_line:
+    if sink_line is None:
         sink_line = finding.get("end", {}).get("line", 0) or finding.get(
             "start", {},
         ).get("line", 0)
 
-    if not src_line or not sink_line:
+    if src_line is None or sink_line is None:
         return ResolutionFailure(
             reason="semgrep: missing source or sink line",
         )
@@ -303,12 +303,12 @@ def _semgrep_extract_line(trace: Any) -> Optional[int]:
     if isinstance(trace, dict):
         loc = trace.get("location", {})
         line = loc.get("start", {}).get("line")
-        if line:
+        if line is not None:
             return line
         # Some semgrep shapes have the line at the top of the trace
         start = trace.get("start", {})
         line = start.get("line") if isinstance(start, dict) else None
-        if line:
+        if line is not None:
             return line
     if isinstance(trace, list) and trace:
         return _semgrep_extract_line(trace[0])
