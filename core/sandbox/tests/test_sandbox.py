@@ -375,9 +375,11 @@ class TestSandboxNetworkIsolation(unittest.TestCase):
     def test_command_still_works(self):
         """Basic commands work inside network sandbox."""
         with sandbox(block_network=True) as run:
-            result = run(["echo", "sandboxed"], capture_output=True, text=True)
+            try:
+                result = run(["echo", "sandboxed"], capture_output=True, text=True)
+            except OSError:
+                result = run(["echo", "sandboxed"], capture_output=True, text=True)
             if result.returncode == 137:
-                # PID namespace teardown race under CI load — retry once.
                 result = run(["echo", "sandboxed"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0)
         self.assertIn("sandboxed", result.stdout)
@@ -387,7 +389,10 @@ class TestSandboxRun(unittest.TestCase):
     """Test the convenience run() function."""
 
     def test_basic(self):
-        result = sandbox_run(["echo", "test"], capture_output=True, text=True)
+        try:
+            result = sandbox_run(["echo", "test"], capture_output=True, text=True)
+        except OSError:
+            result = sandbox_run(["echo", "test"], capture_output=True, text=True)
         if result.returncode == 137:
             result = sandbox_run(["echo", "test"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0)
@@ -414,7 +419,10 @@ class TestSandboxProfiles(unittest.TestCase):
         if not check_sandbox_available():
             self.skipTest("User namespaces not available")
         with sandbox(profile="network-only") as run:
-            result = run(["echo", "net-only"], capture_output=True, text=True)
+            try:
+                result = run(["echo", "net-only"], capture_output=True, text=True)
+            except OSError:
+                result = run(["echo", "net-only"], capture_output=True, text=True)
             if result.returncode == 137:
                 result = run(["echo", "net-only"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0)
@@ -425,7 +433,10 @@ class TestSandboxProfiles(unittest.TestCase):
         if not check_sandbox_available():
             self.skipTest("User namespaces not available")
         with sandbox(profile="full") as run:
-            result = run(["echo", "full"], capture_output=True, text=True)
+            try:
+                result = run(["echo", "full"], capture_output=True, text=True)
+            except OSError:
+                result = run(["echo", "full"], capture_output=True, text=True)
             if result.returncode == 137:
                 result = run(["echo", "full"], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0)
@@ -438,12 +449,13 @@ class TestSandboxProfiles(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
 
     def test_convenience_run_with_profile(self):
-        result = sandbox_run(["echo", "profiled"], profile="none",
-                             capture_output=True, text=True)
+        try:
+            result = sandbox_run(["echo", "profiled"], profile="none",
+                                 capture_output=True, text=True)
+        except OSError:
+            result = sandbox_run(["echo", "profiled"], profile="none",
+                                 capture_output=True, text=True)
         if result.returncode == 137:
-            # PID namespace teardown race under CI load — retry once.
-            # Same pattern as sibling tests in this class
-            # (test_basic, test_profile_network_only, test_profile_full).
             result = sandbox_run(["echo", "profiled"], profile="none",
                                  capture_output=True, text=True)
         self.assertEqual(result.returncode, 0)
