@@ -664,7 +664,11 @@ def bench(
             err=True,
         )
         raise typer.Exit(code=1)
-    payload = json.loads(_sample_text)
+    try:
+        payload = json.loads(_sample_text)
+    except json.JSONDecodeError as exc:
+        typer.echo(f"bench: sample {sample} is not valid JSON: {exc}", err=True)
+        raise typer.Exit(code=1)
     # Pre-fix `payload["cves"]` and `c["cve_id"]` raised KeyError
     # / TypeError on malformed sample files — the operator saw an
     # opaque traceback instead of a structured "sample is missing

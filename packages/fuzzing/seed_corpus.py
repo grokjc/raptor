@@ -356,7 +356,10 @@ def prepare_builtin_seed_corpus(out_dir: Path, profile: str = "default") -> dict
     if not manifest_path.is_file():
         raise FileNotFoundError(f"built-in seed corpus manifest missing: {manifest_path}")
 
-    source_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    try:
+        source_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        raise ValueError(f"malformed seed corpus manifest: {exc}") from exc
     seeds_config = source_manifest.get("seeds") or []
     if not isinstance(seeds_config, list):
         raise ValueError("built-in seed corpus manifest has invalid seeds list")

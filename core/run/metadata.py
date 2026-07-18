@@ -857,7 +857,7 @@ def _update_status(output_dir: Path, status: str,
                 pass
 
     if extra:
-        existing_extra = metadata.get("extra", {})
+        existing_extra = metadata.get("extra") or {}
         existing_extra.update(extra)
         metadata["extra"] = existing_extra
 
@@ -865,7 +865,7 @@ def _update_status(output_dir: Path, status: str,
         # Merge caller-supplied end-of-run provenance into the start-sealed
         # manifest. Shallow top-level merge: source_control / environment
         # (sealed at start) stay put; models land here.
-        existing_manifest = metadata.get("manifest", {})
+        existing_manifest = metadata.get("manifest") or {}
         existing_manifest.update(manifest)
         metadata["manifest"] = existing_manifest
 
