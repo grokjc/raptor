@@ -340,7 +340,7 @@ class FileCallGraph:
             imports=dict(d.get("imports") or {}),
             calls=[
                 CallSite(
-                    line=int(c.get("line", 0)),
+                    line=int(c.get("line") or 0),
                     chain=list(c.get("chain") or []),
                     caller=c.get("caller"),
                     receiver_class=c.get("receiver_class"),
@@ -358,10 +358,10 @@ class FileCallGraph:
             classes=[
                 ClassDef(
                     name=str(k.get("name", "")),
-                    line=int(k.get("line", 0)),
+                    line=int(k.get("line") or 0),
                     bases=list(k.get("bases") or []),
                     methods=[
-                        (str(m[0]), int(m[1]))
+                        (str(m[0]), int(m[1] or 0))
                         for m in (k.get("methods") or [])
                         if isinstance(m, (list, tuple)) and len(m) >= 2
                     ],
@@ -372,7 +372,7 @@ class FileCallGraph:
             decorated_functions=[
                 DecoratedFunction(
                     name=str(df.get("name", "")),
-                    line=int(df.get("line", 0)),
+                    line=int(df.get("line") or 0),
                     decorators=[
                         list(ch) for ch in (df.get("decorators") or [])
                         if isinstance(ch, (list, tuple))
@@ -382,7 +382,7 @@ class FileCallGraph:
             ],
             package_name=d.get("package_name"),
             relative_imports=[
-                (int(r[0]), str(r[1] or ""), str(r[2] or ""),
+                (int(r[0] or 0), str(r[1] or ""), str(r[2] or ""),
                  r[3] if len(r) > 3 else None)
                 for r in rel if isinstance(r, (list, tuple)) and len(r) >= 3
             ],

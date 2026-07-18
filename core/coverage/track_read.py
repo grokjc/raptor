@@ -43,6 +43,8 @@ def _find_active_run():
             return None, None
 
         data = json.loads(project_file.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return None, None
         project_dir = data.get("output_dir", "")
         target = data.get("target", "")
         if not project_dir or not Path(project_dir).is_dir():

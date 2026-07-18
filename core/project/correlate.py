@@ -149,8 +149,8 @@ def _get_run_model(run_dir: Path) -> str:
     """Extract the analysis model name for a run."""
     orch = load_json(run_dir / "orchestrated_report.json")
     if orch and isinstance(orch, dict):
-        o = orch.get("orchestration", {})
-        models = o.get("analysis_models", [])
+        o = orch.get("orchestration") or {}
+        models = o.get("analysis_models") or []
         if models:
             return ", ".join(models)
         m = o.get("analysis_model")
@@ -158,8 +158,8 @@ def _get_run_model(run_dir: Path) -> str:
             return m
     meta = load_run_metadata(run_dir)
     if meta:
-        extra = meta.get("extra", {})
-        models = extra.get("analysis_models", [])
+        extra = meta.get("extra") or {}
+        models = extra.get("analysis_models") or []
         if models:
             return ", ".join(models)
         m = extra.get("analysis_model")

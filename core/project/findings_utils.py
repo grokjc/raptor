@@ -65,7 +65,7 @@ def load_findings_from_dir(run_dir: Path) -> List[Dict[str, Any]]:
     if isinstance(data, list):
         return data
     if isinstance(data, dict):
-        return data.get("findings", data.get("results", []))
+        return data.get("findings") or data.get("results") or []
     return []
 
 
@@ -88,7 +88,7 @@ def load_sca_findings_from_dir(run_dir: Path) -> List[Dict[str, Any]]:
     if isinstance(data, list):
         return data
     if isinstance(data, dict):
-        return data.get("findings", data.get("results", []))
+        return data.get("findings") or data.get("results") or []
     return []
 
 

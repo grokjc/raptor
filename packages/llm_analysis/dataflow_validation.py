@@ -102,6 +102,8 @@ def discover_codeql_databases(out_dir: Path) -> Dict[str, Path]:
         try:
             import json
             data = json.loads(report_path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                data = {}
             for lang, info in (data.get("databases_created") or {}).items():
                 if not isinstance(info, dict) or not info.get("success"):
                     continue
@@ -1945,10 +1947,12 @@ def _any_match_at_finding_location(
     that's on the line above).
     """
     target_file = (finding.get("file_path") or finding.get("file") or "")
-    target_line = int(finding.get("start_line") or finding.get("line") or 0)
+    try:
+        target_line = int(finding.get("start_line") or finding.get("line") or 0)
+    except (ValueError, TypeError):
+        target_line = 0
     if not target_file:
-        # Without a target line we can't location-match; assume any
-        # match supports the finding (same file at minimum).
+        # No file to location-match; assume any match supports the finding.
         return bool(matches)
 
     target_basename = Path(target_file).name
@@ -1958,7 +1962,10 @@ def _any_match_at_finding_location(
             continue
         if Path(m_file).name != target_basename:
             continue
-        m_line = int(m.get("line") or 0)
+        try:
+            m_line = int(m.get("line") or 0)
+        except (ValueError, TypeError):
+            m_line = 0
         if target_line == 0 or abs(m_line - target_line) <= 5:
             return True
     return False

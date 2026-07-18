@@ -1005,11 +1005,11 @@ class ModelScorecard:
                 try:
                     import json
                     self.data = json.loads(content)
+                    if not isinstance(self.data, dict):
+                        raise TypeError(
+                            f"expected dict, got {type(self.data).__name__}"
+                        )
                 except (ValueError, TypeError) as e:
-                    # Corrupt sidecar — degrade gracefully. We do
-                    # NOT raise: a corrupt scorecard should never
-                    # block a scan. Operator can inspect / restore
-                    # via the CLI's reset --all if needed.
                     logger.warning(
                         f"scorecard: corrupt JSON at {path} — "
                         f"reading as empty (error: {e})"
