@@ -521,8 +521,9 @@ class ModelScorecard:
                 # event so the result counts towards the standard Wilson view
                 # over that slot. correct = response parsed + matched schema;
                 # incorrect = it didn't.
-                pass_n = int(u.get("schema_valid_pass", 0))
-                fail_n = int(u.get("schema_valid_fail", 0))
+                from core.llm.coerce import to_int_safe
+                pass_n = to_int_safe(u.get("schema_valid_pass", 0))
+                fail_n = to_int_safe(u.get("schema_valid_fail", 0))
                 if pass_n or fail_n:
                     now_iso = _now_iso()
                     sv = cell["events"].setdefault(EventType.SCHEMA_VALID, {})

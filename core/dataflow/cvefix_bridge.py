@@ -280,14 +280,15 @@ def _format_path(result: dict) -> str:
     cfs = result.get("codeFlows", [])
     if not cfs:
         return ""
-    steps = cfs[0].get("threadFlows", [{}])[0].get("locations", [])
+    tflows = cfs[0].get("threadFlows") or []
+    steps = tflows[0].get("locations", []) if tflows else []
     rows = []
     for loc in steps:
-        node = loc.get("location", {})
-        phys = node.get("physicalLocation", {})
-        uri = phys.get("artifactLocation", {}).get("uri", "?")
-        line = phys.get("region", {}).get("startLine", "?")
-        msg = node.get("message", {}).get("text", "")
+        node = loc.get("location") or {}
+        phys = node.get("physicalLocation") or {}
+        uri = (phys.get("artifactLocation") or {}).get("uri", "?")
+        line = (phys.get("region") or {}).get("startLine", "?")
+        msg = (node.get("message") or {}).get("text", "")
         rows.append(f"  {Path(uri).name}:{line}  {msg}")
     if not rows:
         return ""

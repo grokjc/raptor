@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 
 def _get_items(file_info):
     """Read code items from a file entry. Handles both old and new format."""
-    return file_info.get("items", file_info.get("functions", []))
+    return file_info.get("items", file_info.get("functions", [])) or []
 
 
 def update_coverage(
@@ -69,7 +69,7 @@ def update_coverage(
             key = (path, cls, name)
             legacy_key = (path, "", name)
             if key in checked_set or legacy_key in checked_set:
-                checked_by = func.get('checked_by', [])
+                checked_by = func.get('checked_by') or []
                 if source_label not in checked_by:
                     checked_by.append(source_label)
                 func['checked_by'] = checked_by
@@ -98,7 +98,7 @@ def get_coverage_stats(inventory: Dict[str, Any]) -> Dict[str, Any]:
                 by_kind[kind] = {"total": 0, "checked": 0}
             by_kind[kind]["total"] += 1
 
-            checked_by = item.get('checked_by', [])
+            checked_by = item.get('checked_by') or []
             if checked_by:
                 checked += 1
                 by_kind[kind]["checked"] += 1

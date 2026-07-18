@@ -84,7 +84,7 @@ def lookup_function(checklist: Dict[str, Any], file_path: str, line: int,
         if entry_path != norm_path:
             continue
 
-        for func in file_entry.get("items", file_entry.get("functions", [])):
+        for func in (file_entry.get("items", file_entry.get("functions", [])) or []):
             # Only FUNCTION items enclose a "function" — globals, macros,
             # classes, top_level and interstitial are not callable units, so a
             # sink landing in one has no enclosing function (callers expect

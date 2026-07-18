@@ -945,6 +945,9 @@ def run_sca(
                   f"· {total} findings total "
                   f"· cache {cache.hits} hit/{cache.misses} miss")
 
+    if offline_db is not None:
+        offline_db.close()
+
     return RunResult(
         target=target,
         output_dir=output_dir,

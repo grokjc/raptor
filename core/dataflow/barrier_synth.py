@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -504,19 +505,19 @@ def _summarise_surviving_finding(
             if target_line is not None and line != target_line:
                 continue
             # We have the surviving result — describe it.
-            cfs = res.get("codeFlows", [])
-            steps = (cfs[0].get("threadFlows", [{}])[0].get("locations", [])
-                     if cfs else [])
+            cfs = res.get("codeFlows") or []
+            tflows = (cfs[0].get("threadFlows") or []) if cfs else []
+            steps = tflows[0].get("locations", []) if tflows else []
             chain = []
             for step in steps:
-                node = step.get("location", {})
-                phys = node.get("physicalLocation", {})
-                s_uri = phys.get("artifactLocation", {}).get("uri", "?")
-                s_line = phys.get("region", {}).get("startLine", "?")
-                s_msg = node.get("message", {}).get("text", "").strip()
+                node = step.get("location") or {}
+                phys = node.get("physicalLocation") or {}
+                s_uri = (phys.get("artifactLocation") or {}).get("uri", "?")
+                s_line = (phys.get("region") or {}).get("startLine", "?")
+                s_msg = ((node.get("message") or {}).get("text") or "").strip()
                 chain.append(f"{Path(s_uri).name}:{s_line}"
                              + (f" {s_msg}" if s_msg else ""))
-            sink_msg = res.get("message", {}).get("text", "").strip()
+            sink_msg = ((res.get("message") or {}).get("text") or "").strip()
             sink_part = f"{Path(uri).name}:{line}" if uri else "?"
             if sink_msg:
                 sink_part += f" — {sink_msg}"
@@ -1215,27 +1216,32 @@ def main(argv: Optional[list] = None) -> int:
     args = p.parse_args(argv)
 
     work_dir = args.work_dir
-    if work_dir is None:
+    created_tmp = work_dir is None
+    if created_tmp:
         work_dir = Path(tempfile.mkdtemp(prefix="trust-synth-work-"))
 
-    proposal = BarrierProposal(
-        sink_class=args.sink_class, finding_id=args.finding_id, language=args.language,
-        sink_snippet=args.sink, source_context=args.source_file.read_text(encoding="utf-8"),
-    )
-    res = run_synthesis_loop(
-        proposal, args.after_db, args.before_db,
-        proposer=make_llm_proposer(default_completer()),
-        work_dir=work_dir, search_path=args.search_path,
-        max_attempts=args.max_attempts,
-    )
-    if res is None:
-        print(f"{args.finding_id}: no compilable barrier after {args.max_attempts} attempts",
-              file=sys.stderr)
-        return 1
-    print(f"{args.finding_id}: sound={res.is_sound} "
-          f"(after={res.after_count}, before={res.before_count})", file=sys.stderr)
-    print(res.query_ql)
-    return 0 if res.is_sound else 2
+    try:
+        proposal = BarrierProposal(
+            sink_class=args.sink_class, finding_id=args.finding_id, language=args.language,
+            sink_snippet=args.sink, source_context=args.source_file.read_text(encoding="utf-8"),
+        )
+        res = run_synthesis_loop(
+            proposal, args.after_db, args.before_db,
+            proposer=make_llm_proposer(default_completer()),
+            work_dir=work_dir, search_path=args.search_path,
+            max_attempts=args.max_attempts,
+        )
+        if res is None:
+            print(f"{args.finding_id}: no compilable barrier after {args.max_attempts} attempts",
+                  file=sys.stderr)
+            return 1
+        print(f"{args.finding_id}: sound={res.is_sound} "
+              f"(after={res.after_count}, before={res.before_count})", file=sys.stderr)
+        print(res.query_ql)
+        return 0 if res.is_sound else 2
+    finally:
+        if created_tmp:
+            shutil.rmtree(work_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
