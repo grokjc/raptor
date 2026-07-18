@@ -377,8 +377,8 @@ class CodeQLAdapter(ToolAdapter):
                 query_file = pack_dir / "query.ql"
                 qlpack = pack_dir / "qlpack.yml"
 
-                query_file.write_text(rule)
-                qlpack.write_text(_qlpack_yaml(rule))
+                query_file.write_text(rule, encoding="utf-8")
+                qlpack.write_text(_qlpack_yaml(rule), encoding="utf-8")
 
                 # See note in run_prebuilt_query — `output=` is
                 # required so codeql can write to its IMB cache

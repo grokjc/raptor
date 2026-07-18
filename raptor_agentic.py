@@ -2311,7 +2311,7 @@ Examples:
             normalized_sarif = findings_to_sarif(import_result.findings)
             normalized_path = out_dir / "imported-normalized.sarif"
             import json as _json
-            normalized_path.write_text(_json.dumps(normalized_sarif, indent=2))
+            normalized_path.write_text(_json.dumps(normalized_sarif, indent=2), encoding="utf-8")
             all_sarif_files.append(normalized_path)
         elif not all_sarif_files:
             print("\n✗ No findings in imported SARIF and no scan results", file=sys.stderr)
@@ -3062,7 +3062,7 @@ Examples:
     if _suppr_path.is_file():
         try:
             _suppr_count = sum(
-                1 for _ in _suppr_path.read_text().splitlines() if _.strip()
+                1 for _ in _suppr_path.read_text(encoding="utf-8").splitlines() if _.strip()
             )
         except OSError:
             _suppr_count = 0

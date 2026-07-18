@@ -408,7 +408,7 @@ def _read_changed_files() -> list[str] | None:
     if not p.is_file():
         return None
     files = [
-        line.strip() for line in p.read_text().splitlines() if line.strip()
+        line.strip() for line in p.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
     if not files:
         return None

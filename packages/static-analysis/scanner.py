@@ -2159,7 +2159,7 @@ def main():
                 logger.info(f"Merged SARIF created: {merged}")
             except Exception as e:
                 logger.warning(f"SARIF merge failed, using individual files: {e}")
-                (out_dir / "sarif_merge.stderr.log").write_text(str(e))
+                (out_dir / "sarif_merge.stderr.log").write_text(str(e), encoding="utf-8")
 
         # Generate metrics. When --exclude-dir filtered the combined
         # SARIF, metrics should reflect the filtered set — read from

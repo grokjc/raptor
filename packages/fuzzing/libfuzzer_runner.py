@@ -182,8 +182,8 @@ class LibFuzzerRunner:
                 self._parse_progress_line(line, telemetry)
 
         # Persist raw output for debugging
-        (self.output_dir / "stderr.log").write_text(stderr)
-        (self.output_dir / "stdout.log").write_text(stdout)
+        (self.output_dir / "stderr.log").write_text(stderr, encoding="utf-8")
+        (self.output_dir / "stdout.log").write_text(stdout, encoding="utf-8")
 
         result = self._parse_result(stderr, stdout, elapsed)
         logger.info(

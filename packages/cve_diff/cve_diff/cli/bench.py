@@ -147,7 +147,7 @@ def _run_one(cve_id: str, output_dir: str, disk_limit_pct: float = 80.0,
                 result = pipeline.run(cve_id, Path(tmp))
                 osv = osv_schema.render(result.bundle)
                 (out / f"{cve_id}.osv.json").write_text(
-                    json.dumps(osv, indent=2) + "\n"
+                    json.dumps(osv, indent=2) + "\n", encoding="utf-8",
                 )
                 consensus = result.bundle.consensus or {}
                 ext_agree = result.bundle.extraction_agreement or {}
@@ -271,7 +271,7 @@ def _write_failure_md(output_dir: Path, cve_id: str, error_class: str,
     try:
         from cve_diff.report.markdown import render_failure
         text = render_failure(cve_id, error_class, error_text)
-        (output_dir / f"{cve_id}.md").write_text(text)
+        (output_dir / f"{cve_id}.md").write_text(text, encoding="utf-8")
     except Exception as exc:  # noqa: BLE001 — report write must not abort bench
         import logging as _logging
         _logging.getLogger(__name__).debug(

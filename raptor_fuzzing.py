@@ -717,7 +717,7 @@ Examples:
                         # Get the generated exploit code
                         exploit_file = out_dir / "analysis" / "exploits" / f"{crash.crash_id}_exploit.c"
                         if exploit_file.exists():
-                            exploit_code = exploit_file.read_text()
+                            exploit_code = exploit_file.read_text(encoding="utf-8")
 
                             # Validate and iteratively refine
                             success, refined_code, _refined_binary = exploit_validator.validate_and_refine(
@@ -731,7 +731,7 @@ Examples:
                             # If refined version is better, save it
                             if success and refined_code:
                                 refined_file = out_dir / "analysis" / "exploits" / f"{crash.crash_id}_exploit_validated.c"
-                                refined_file.write_text(refined_code)
+                                refined_file.write_text(refined_code, encoding="utf-8")
                                 logger.info(f"✓ Validated exploit saved: {refined_file}")
 
                                 # Update memory with success
@@ -745,7 +745,7 @@ Examples:
                             elif refined_code:
                                 # Refinement attempted but failed - save best attempt
                                 refined_file = out_dir / "analysis" / "exploits" / f"{crash.crash_id}_exploit_best_attempt.c"
-                                refined_file.write_text(refined_code)
+                                refined_file.write_text(refined_code, encoding="utf-8")
                                 logger.warning(f"⚠ Best attempt exploit saved: {refined_file}")
 
                                 # Update memory with failure

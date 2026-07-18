@@ -449,7 +449,7 @@ class AFLRunner:
             stderr_path = log_dir / f"{instance_name}.stderr.log"
             stdout_fp = stdout_path.open("w", encoding="utf-8", errors="replace")
             stderr_fp = stderr_path.open("w", encoding="utf-8", errors="replace")
-            (log_dir / f"{instance_name}.cmdline").write_text(" ".join(cmd) + "\n")
+            (log_dir / f"{instance_name}.cmdline").write_text(" ".join(cmd) + "\n", encoding="utf-8")
 
             try:
                 from core.sandbox.preexec import set_pdeathsig

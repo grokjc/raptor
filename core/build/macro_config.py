@@ -237,7 +237,7 @@ def extract_build_tus(target: Path) -> Optional[frozenset]:
     if cc is None:
         return None
     try:
-        entries = json.loads(cc.read_text(errors="replace"))
+        entries = json.loads(cc.read_text(encoding="utf-8", errors="replace"))
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         logger.debug("compile_commands.json TU-set parse failed: %s", exc)
         return None

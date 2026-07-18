@@ -232,7 +232,7 @@ def _write_failure_md(output_dir: Path, cve_id: str, error_class: str,
     failures here are not allowed to break the CLI's exit-code path."""
     try:
         text = markdown.render_failure(cve_id, error_class, error_text)
-        (output_dir / f"{cve_id}.md").write_text(text)
+        (output_dir / f"{cve_id}.md").write_text(text, encoding="utf-8")
         typer.echo(f"wrote {output_dir / f'{cve_id}.md'}")
     except Exception as exc:  # noqa: BLE001 — never block the CLI on report-write
         import logging as _logging

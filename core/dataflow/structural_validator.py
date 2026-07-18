@@ -205,7 +205,7 @@ def _find_enclosing_function(
             if f.line_start <= line and (f.line_end is None or line <= f.line_end):
                 return f.name
     except Exception:
-        pass
+        logger.debug("function-at-line lookup failed", exc_info=True)
     return None
 
 
