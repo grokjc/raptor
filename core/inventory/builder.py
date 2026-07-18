@@ -919,6 +919,6 @@ def _process_single_file(
                 }
         return record
 
-    except Exception as e:
+    except Exception:
         logger.warning("Failed to process %s", filepath, exc_info=True)
         return None
