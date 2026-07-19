@@ -331,7 +331,7 @@ class CodeQLAgent:
             logger.info(f"{'=' * 70}")
 
             language_build_map = {}
-            for lang in detected.keys():
+            for lang in detected:
                 if build_commands and lang in build_commands:
                     # Use custom build command
                     logger.info(f"{lang}: Using custom build command")
@@ -435,7 +435,7 @@ class CodeQLAgent:
                 )
 
             logger.info(f"\n✓ Created {len(successful_dbs)} database(s):")
-            for lang in successful_dbs.keys():
+            for lang in successful_dbs:
                 cached = " (cached)" if db_results[lang].cached else ""
                 logger.info(f"  - {lang}{cached}")
 

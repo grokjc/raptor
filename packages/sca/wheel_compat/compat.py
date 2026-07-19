@@ -415,7 +415,7 @@ def find_compatible_version(
         return None
 
     stable = [
-        v for v in releases.keys()
+        v for v in releases
         if _is_stable_version(v)
     ]
     stable.sort(key=_version_key, reverse=True)

@@ -203,7 +203,7 @@ class CorpusGenerator:
 
         # For each seed, create versions with each detected command
         for seed in seeds:
-            for cmd in self.detected_commands.keys():
+            for cmd in self.detected_commands:
                 # Format: COMMAND:DATA
                 wrapped = f"{cmd}:".encode() + seed
                 wrapped_seeds.append(wrapped)
