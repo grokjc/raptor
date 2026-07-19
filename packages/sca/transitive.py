@@ -450,7 +450,7 @@ def _try_cascade_batch(
         results = _dry_run_batch(
             resolver, project_dirs, common_root=common_root,
         )
-    for (pd, host), result in zip(work_items, results):
+    for (pd, host), result in zip(work_items, results, strict=True):
         if not result.success:
             out.append((
                 pd, host, None,

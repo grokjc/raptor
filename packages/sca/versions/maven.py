@@ -104,7 +104,7 @@ def compare(a: str, b: str) -> int:
     # Compare aligned non-separator tokens.
     ia = [p for p in items_a if p[0] != "sep"]
     ib = [p for p in items_b if p[0] != "sep"]
-    for ta, tb in zip(ia, ib):
+    for ta, tb in zip(ia, ib, strict=False):
         c = _compare_tokens(ta, tb)
         if c != 0:
             return c

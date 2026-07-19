@@ -460,7 +460,7 @@ async def seed(sage_url: str, dry_run: bool = False, force: bool = False):
         return_exceptions=True,
     )
     results = []
-    for mem, r in zip(all_memories, raw_results):
+    for mem, r in zip(all_memories, raw_results, strict=True):
         if isinstance(r, BaseException):
             label = getattr(mem, "label", str(mem))
             results.append((label, f"failed: {type(r).__name__}: {r}"))

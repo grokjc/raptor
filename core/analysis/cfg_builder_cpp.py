@@ -1090,7 +1090,7 @@ class _CPPCFGBuilder:
         # Now build each case.
         prev_out: List[CPPCFGNode] = []
         outs: List[CPPCFGNode] = []
-        for labels, group in zip(case_entries, case_groups):
+        for labels, group in zip(case_entries, case_groups, strict=True):
             # case label node(s) — model as one node per label.
             entry: List[CPPCFGNode] = [header] + prev_out
             for label_stmt in labels:

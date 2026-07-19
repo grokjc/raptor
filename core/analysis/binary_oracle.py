@@ -476,7 +476,7 @@ def _demangle_linkage_names(linkage_names: Iterable[str]) -> Dict[str, str]:
     lines = proc.stdout.splitlines()
     if len(lines) != len(seen):
         return {}
-    return dict(zip(seen, lines))
+    return dict(zip(seen, lines, strict=True))
 
 
 # DIE tags that introduce a C++ name-scope; subprogram DIEs nested under

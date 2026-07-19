@@ -2093,7 +2093,7 @@ def _apply_clean_coverage(project, plan, consequences):
         # into the same coverage.json (see _snapshot_run_coverage).
         with coverage_store_lock(cov_path):
             store = CoverageStore(cov_path)
-            for victim, cons in zip(plan.get("delete_dirs", []), consequences):
+            for victim, cons in zip(plan.get("delete_dirs", []), consequences, strict=True):
                 apply_removal(store, victim, checklist, cons)
             store.save()
     except Exception as e:

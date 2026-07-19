@@ -341,10 +341,10 @@ def _render_table(
         for i in range(len(headers))
     ]
     lines = []
-    lines.append(" | ".join(h.ljust(w) for h, w in zip(headers, widths)))
+    lines.append(" | ".join(h.ljust(w) for h, w in zip(headers, widths, strict=True)))
     lines.append("-+-".join("-" * w for w in widths))
     for r in rows:
-        lines.append(" | ".join(str(c).ljust(w) for c, w in zip(r, widths)))
+        lines.append(" | ".join(str(c).ljust(w) for c, w in zip(r, widths, strict=True)))
     return "\n".join(lines)
 
 
@@ -398,10 +398,10 @@ def _render_compare(
         for i in range(len(headers))
     ]
     lines = []
-    lines.append(" | ".join(h.ljust(w) for h, w in zip(headers, widths)))
+    lines.append(" | ".join(h.ljust(w) for h, w in zip(headers, widths, strict=True)))
     lines.append("-+-".join("-" * w for w in widths))
     for r in rows:
-        lines.append(" | ".join(str(c).ljust(w) for c, w in zip(r, widths)))
+        lines.append(" | ".join(str(c).ljust(w) for c, w in zip(r, widths, strict=True)))
     return "\n".join(lines)
 
 

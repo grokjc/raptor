@@ -1035,7 +1035,7 @@ def _shared_prefix_len(a: str, b: str) -> int:
     the specificity score for credential reuse (longer = closer relative)."""
     a, b = a.lower(), b.lower()
     n = 0
-    for ca, cb in zip(a, b):
+    for ca, cb in zip(a, b, strict=False):
         if ca != cb:
             break
         n += 1

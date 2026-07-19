@@ -447,7 +447,7 @@ def _runtime_parser_flows(
         })
         item["events"].append(event)
         backtrace_ids, backtrace_names = map_backtrace_functions(event)
-        for function_id, function_name in zip(backtrace_ids, backtrace_names):
+        for function_id, function_name in zip(backtrace_ids, backtrace_names, strict=True):
             if function_id in item["backtrace_function_ids"]:
                 continue
             item["backtrace_function_ids"].append(function_id)

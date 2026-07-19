@@ -550,7 +550,7 @@ def osv_malicious(http, ecosystem: str, names: List[str]) -> set:
             body = {"queries": [
                 {"package": {"ecosystem": eco, "name": n}} for n in chunk]}
             resp = http.post_json(OSV_QUERY_BATCH_URL, body)
-            for n, res in zip(chunk, (resp or {}).get("results") or []):
+            for n, res in zip(chunk, (resp or {}).get("results") or [], strict=True):
                 vulns = (res or {}).get("vulns") or []
                 if any(isinstance(v, dict) and isinstance(v.get("id"), str)
                        and v["id"].startswith("MAL-") for v in vulns):
