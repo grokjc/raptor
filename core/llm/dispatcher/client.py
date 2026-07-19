@@ -51,7 +51,7 @@ def read_token(fd: Optional[int] = None) -> str:
         except (ValueError, TypeError):
             raise RuntimeError(
                 f"RAPTOR_LLM_TOKEN_FD is not a valid fd number: {env!r}"
-            )
+            ) from None
     try:
         # 64 bytes is plenty for a 32-byte url-safe token.
         raw = os.read(fd, 64)

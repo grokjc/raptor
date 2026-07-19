@@ -370,7 +370,7 @@ class ProjectManager:
                     f"Refusing to delete output path {output} outside the "
                     f"expected base {expected_base}. Use --no-purge or "
                     f"clean the directory by hand."
-                )
+                ) from None
             shutil.rmtree(project.output_path)
             logger.info(f"Deleted output directory: {project.output_dir}")
 

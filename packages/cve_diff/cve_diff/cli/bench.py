@@ -656,7 +656,7 @@ def bench(
             _sample_text = _sf.read(_MAX_SAMPLE_BYTES + 1)
     except OSError as e:
         typer.echo(f"bench: cannot read sample {sample}: {e}", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
     if len(_sample_text) > _MAX_SAMPLE_BYTES:
         typer.echo(
             f"bench: sample {sample} exceeds {_MAX_SAMPLE_BYTES} bytes — "
@@ -668,7 +668,7 @@ def bench(
         payload = json.loads(_sample_text)
     except json.JSONDecodeError as exc:
         typer.echo(f"bench: sample {sample} is not valid JSON: {exc}", err=True)
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from exc
     # Pre-fix `payload["cves"]` and `c["cve_id"]` raised KeyError
     # / TypeError on malformed sample files — the operator saw an
     # opaque traceback instead of a structured "sample is missing

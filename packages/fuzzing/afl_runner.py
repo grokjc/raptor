@@ -150,7 +150,7 @@ class AFLRunner:
             logger.warning("AFL validation timed out - AFL may be slow to start")
         except Exception as e:
             logger.warning(f"AFL validation failed: {e}")
-            raise RuntimeError(f"AFL++ validation failed: {e}")
+            raise RuntimeError(f"AFL++ validation failed: {e}") from e
 
     def _create_default_corpus(self) -> Path:
         """Create minimal default corpus if none provided.
@@ -255,7 +255,7 @@ class AFLRunner:
                 logger.warning("AFL --help command timed out")
             except FileNotFoundError:
                 logger.error("afl-fuzz not found in PATH")
-                raise RuntimeError("AFL++ not installed")
+                raise RuntimeError("AFL++ not installed") from None
             except Exception as e:
                 logger.warning(f"AFL compatibility check failed: {e}")
 

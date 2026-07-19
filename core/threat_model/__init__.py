@@ -249,7 +249,7 @@ class ThreatModel:
                 raise ValueError(
                     f"threat-model version must be an integer, got "
                     f"{type(raw_version).__name__}"
-                )
+                ) from None
             if not (
                 SCHEMA_VERSION_MIN <= version <= SCHEMA_VERSION_MAX
             ):
