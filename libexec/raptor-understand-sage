@@ -14,18 +14,20 @@ store:  reads context-map.json, flow-trace-*.json, variants.json from
 Both are best-effort: SAGE unavailable → exit 0 silently.
 """
 
-import os
 import sys
+from pathlib import Path
 
-if not (os.environ.get("CLAUDECODE") or os.environ.get("_RAPTOR_TRUSTED")):
+# ─── trust-marker check (do not import; inline by design) ───
+import os
+if not (os.environ.get("CLAUDECODE")
+        or os.environ.get("_RAPTOR_TRUSTED")):
     sys.stderr.write(
         f"{sys.argv[0]}: internal dispatch script.\n"
         "  Run via 'bin/raptor' instead.\n"
         "  Tests / power users: set _RAPTOR_TRUSTED=1 to bypass.\n"
     )
     sys.exit(2)
-
-from pathlib import Path  # noqa: E402
+# ─── end trust-marker check ─────────────────────────────────
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import core.startup.process_init  # noqa: E402,F401

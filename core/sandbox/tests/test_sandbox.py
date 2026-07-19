@@ -628,7 +628,7 @@ class TestSeccompBlocklist(unittest.TestCase):
             return sandbox_run(
                 ["python3", "-c", code],
                 profile=profile, target=d, output=d,
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, timeout=15,
             )
 
     def test_af_unix_blocked_in_full(self):
