@@ -189,7 +189,7 @@ class Project:
             if not meta_file.exists():
                 continue
             meta = load_json(meta_file)
-            if meta and meta.get("status") == "running":
+            if isinstance(meta, dict) and meta.get("status") == "running":
                 running.append((meta.get("timestamp", ""), d, meta.get("session_pid")))
 
         if not running:
@@ -321,7 +321,7 @@ class ProjectManager:
         if not project_file.is_relative_to(self.projects_dir.resolve()):
             return None
         data = load_json(project_file)
-        if data is None:
+        if not isinstance(data, dict):
             return None
         return Project.from_dict(data)
 
@@ -330,7 +330,7 @@ class ProjectManager:
         projects = []
         for f in sorted(self.projects_dir.glob("*.json")):
             data = load_json(f)
-            if data:
+            if isinstance(data, dict):
                 projects.append(Project.from_dict(data))
         return projects
 

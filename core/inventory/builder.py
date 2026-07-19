@@ -277,7 +277,7 @@ def build_inventory(
     old_inventory = load_json(checklist_file)
 
     old_files_by_path = {}
-    if old_inventory:
+    if isinstance(old_inventory, dict):
         for f in old_inventory.get('files', []):
             if f.get('path') and f.get('sha256'):
                 old_files_by_path[f['path']] = f

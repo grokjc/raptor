@@ -426,7 +426,8 @@ def load_understand_context(
     #     would survive a stale-files set containing the canonical
     #     `foo.py` and leak through. The validate dir's checklist is the
     #     ground truth for normalisation. ---
-    validate_checklist = load_json(validate_dir / "checklist.json") or {}
+    _raw_cl = load_json(validate_dir / "checklist.json")
+    validate_checklist = _raw_cl if isinstance(_raw_cl, dict) else {}
     normalize_context_map(context_map, validate_checklist,
                           target_path=validate_checklist.get("target_path"))
 
@@ -1324,7 +1325,8 @@ def _merge_attack_surface(
 
     changed = False
     if surface_path.exists():
-        existing = load_json(surface_path) or {}
+        _raw_surf = load_json(surface_path)
+        existing = _raw_surf if isinstance(_raw_surf, dict) else {}
         merged_sources = _merge_list_by_key(
             existing.get("sources", []), new_sources, key="entry"
         )

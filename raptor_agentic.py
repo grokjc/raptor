@@ -934,7 +934,8 @@ def _build_fuzz_phase_summary(fuzzing_result: dict | None, fuzz_out: Path | None
     telemetry = {}
     telemetry_path = fuzzing_result.get("telemetry")
     if telemetry_path:
-        telemetry = load_json(telemetry_path) or {}
+        _raw = load_json(telemetry_path)
+        telemetry = _raw if isinstance(_raw, dict) else {}
     crashes_dir = fuzzing_result.get("crashes_dir")
     crash_paths = []
     if crashes_dir:

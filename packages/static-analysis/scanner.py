@@ -1986,7 +1986,8 @@ def main():
             try:
                 from core.json import load_json
                 from core.sage.hooks import format_sage_memories_for_prompt
-                raw = load_json(precall) or {}
+                _raw = load_json(precall)
+                raw = _raw if isinstance(_raw, dict) else {}
                 mems = raw.get("memories") or []
                 formatted = format_sage_memories_for_prompt(mems)
                 if formatted:

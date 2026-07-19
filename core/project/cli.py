@@ -1521,10 +1521,11 @@ def _print_coverage(project, detailed=False, fail_under=None):
         _logging.getLogger(__name__).warning("failed to list run dirs: %s", exc)
         run_dirs = []
     checklist = load_json(base / "checklist.json")
-    if not checklist:
+    if not isinstance(checklist, dict):
+        checklist = None
         for d in run_dirs:
             cl = load_json(d / "checklist.json")
-            if cl:
+            if isinstance(cl, dict):
                 checklist = cl
                 break
     store_path = base / "coverage.json"
@@ -2085,7 +2086,7 @@ def _apply_clean_coverage(project, plan, consequences):
         from core.coverage.clean import apply_removal
 
         checklist = load_json(Path(project.output_dir) / "checklist.json")
-        if not checklist:
+        if not isinstance(checklist, dict):
             return
         cov_path = Path(project.output_dir) / "coverage.json"
         # Lock the whole read-modify-write: a run completing mid-clean snapshots
