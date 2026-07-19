@@ -2539,6 +2539,7 @@ def binary_oracle_absent(
             )]
         else:
             candidates = candidates[:1]
+    any_confirmed = False
     for item in candidates:
         meta = item.get("metadata")
         if not isinstance(meta, dict):
@@ -2561,8 +2562,8 @@ def binary_oracle_absent(
         if any(isinstance(b, dict) and b.get("tier") != "full"
                for b in per_binary):
             return False
-        return True
-    return False
+        any_confirmed = True
+    return any_confirmed
 
 
 def is_lexically_dead(
@@ -3536,6 +3537,8 @@ def entry_reachability(
                           target_module=target_module):
         return "uncertain"
     rc = reverse_closure(inventory, target, max_depth=max_depth)
+    if rc.truncated:
+        return "uncertain"
     for fn in rc.nodes:
         if isinstance(fn, InternalFunction) and _file_masks_target(
             inventory, fn.file_path, target.name,

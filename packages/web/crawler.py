@@ -95,6 +95,8 @@ class WebCrawler:
         if not isinstance(metadata, dict):
             return False
         input_type = str(metadata.get("type", "")).strip().lower()
+        if input_type == "password":
+            return True
         normalized_name = str(name).strip().lower()
         return (
             input_type == "hidden" and normalized_name in _SENSITIVE_HIDDEN_INPUT_NAMES

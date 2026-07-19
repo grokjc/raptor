@@ -242,12 +242,13 @@ class LibFuzzerRunner:
             parts = line.split("Test unit written to", 1)
             if len(parts) == 2:
                 path = parts[1].strip()
-                if "crash" in path.lower():
-                    telemetry.record_crash(path, signal="libfuzzer")
-                elif "timeout" in path.lower():
+                basename = path.rsplit("/", 1)[-1].lower()
+                if "timeout" in basename:
                     telemetry.record_timeout(path)
-                elif "oom" in path.lower():
+                elif "oom" in basename:
                     telemetry.record_oom(path)
+                elif "crash" in basename:
+                    telemetry.record_crash(path, signal="libfuzzer")
 
     def _build_command(self) -> List[str]:
         cmd = [str(self.harness)]

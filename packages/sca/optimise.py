@@ -42,6 +42,7 @@ from .update import (
     _plan_targets,
     _rewrite_one,
 )
+from .versions import compare as version_compare
 
 logger = logging.getLogger(__name__)
 
@@ -410,7 +411,7 @@ def _plan_hygiene_pins(
     for plan in vuln_plans.values():
         dep_key = (plan.ecosystem, plan.name, plan.installed)
         existing = vuln_by_dep.get(dep_key)
-        if existing is None or plan.target > existing.target:
+        if existing is None or version_compare(plan.target, existing.target) > 0:
             vuln_by_dep[dep_key] = plan
 
     for key, plan in plans.items():

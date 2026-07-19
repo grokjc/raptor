@@ -108,7 +108,7 @@ class WebScanner:
             # large crawls, the cross-product can be N×M; the
             # fuzzer's own per-call rate limiting bounds the
             # wall time.
-            target_urls = list(crawl_results.get('discovered_urls') or [self.base_url])
+            target_urls = sorted(self.crawler.discovered_urls) or [self.base_url]
             for target_url in target_urls:
                 for param in crawl_results['discovered_parameters']:
                     findings = self.fuzzer.fuzz_parameter(

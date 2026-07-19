@@ -2372,14 +2372,11 @@ Examples:
         threat_model_phase.get("generated_candidates", 0)
         if threat_model_phase.get("completed") else 0
     )
-    total_findings = (semgrep_metrics.get('total_findings', 0)
-                      + codeql_metrics.get('total_findings', 0)
-                      + sca_findings_count
-                      + threat_model_findings_count)
     imported_findings_count = import_result.stats.total_imported if import_result else 0
     total_findings = (semgrep_metrics.get('total_findings', 0)
                       + codeql_metrics.get('total_findings', 0)
                       + sca_findings_count
+                      + threat_model_findings_count
                       + imported_findings_count)
     scan_metrics = {
         'total_findings': total_findings,
@@ -2930,7 +2927,7 @@ Examples:
                             if args.validate:
                                 validation_smoke = _run_fuzz_validation_smoke(
                                     crash_outputs["findings"],
-                                    Path(args.binary),
+                                    Path(args.binary[0]),
                                     fuzz_out,
                                 )
                                 final_report["outputs"]["fuzzing_validation_run"] = validation_smoke.get("dir")
