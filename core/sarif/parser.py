@@ -486,7 +486,9 @@ def parse_sarif_findings(sarif_path: Path) -> List[Dict[str, Any]]:
         # Resolve via the run's `originalUriBaseIds` table.
         uri_bases = run.get("originalUriBaseIds") or {}
 
-        def _resolve_uri(art: Dict[str, Any]) -> Optional[str]:
+        def _resolve_uri(
+            art: Dict[str, Any], _uri_bases=uri_bases,
+        ) -> Optional[str]:
             """Resolve `art.uri` against the run's `originalUriBaseIds`,
             following nested `uriBaseId` references up to a small depth
             cap. Returns the final URI string, or None if the input
@@ -500,7 +502,7 @@ def parse_sarif_findings(sarif_path: Path) -> List[Dict[str, Any]]:
             while base_id and base_id not in seen and depth < 16:
                 seen.add(base_id)
                 depth += 1
-                base = uri_bases.get(base_id)
+                base = _uri_bases.get(base_id)
                 if not isinstance(base, dict):
                     break
                 base_uri = base.get("uri")

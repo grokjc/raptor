@@ -588,7 +588,7 @@ def reaudit_reviewed_legit(
                     "removed from registry or unreachable")
                 continue
             ev = collect_evidence(Candidate(name, "", 0, 0, 0), eco,
-                                  lambda _n: meta)
+                                  lambda _n, _meta=meta: _meta)
             if ev.deprecated:
                 flags.setdefault(name, []).append("now deprecated")
         if osv_malicious_fn is not None:

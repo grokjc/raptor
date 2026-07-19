@@ -139,17 +139,16 @@ def _build_fresh(tag_dir: Path, build_o0: Path, build_o2: Path) -> None:
             inputs.append(build_dir / "lib" / "decompress" / "zstd_decompress.c")
             inputs.append(build_dir / "lib" / "common" / "fse_decompress.c")
 
-            def _z(*argv: str) -> None:
-                # writable_paths includes build_dir because gcov
-                # instrumentation writes .gcda files alongside the
-                # .o files (under ``build_dir/obj/...``). Without
-                # the explicit allow, the sandbox blocks those
-                # writes and the live_set comes back empty —
-                # making absent_precision mathematically vacuous.
+            def _z(
+                *argv: str,
+                _zstd_bin=zstd_bin,
+                _build_dir=build_dir,
+                _tmp=tmp,
+            ) -> None:
                 _sandbox_run(
-                    [str(zstd_bin), *argv],
-                    target=str(build_dir), output=str(tmp),
-                    writable_paths=[str(build_dir)],
+                    [str(_zstd_bin), *argv],
+                    target=str(_build_dir), output=str(_tmp),
+                    writable_paths=[str(_build_dir)],
                     block_network=True, check=True, timeout=120,
                 )
 
