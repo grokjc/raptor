@@ -373,17 +373,20 @@ def write_scoped_config(
     """
     lines = [f"name: {base_config.get('name', 'RAPTOR CodeQL config')}", ""]
 
+    def _yaml_val(v: str) -> str:
+        return f"'{v}'" if "*" in v else v
+
     if scoped_paths is not None:
         lines.append("paths:")
         for p in sorted(scoped_paths):
-            lines.append(f"  - {p}")
+            lines.append(f"  - {_yaml_val(p)}")
         lines.append("")
 
     pi = base_config.get("paths-ignore", [])
     if pi:
         lines.append("paths-ignore:")
         for p in pi:
-            lines.append(f"  - {p}")
+            lines.append(f"  - {_yaml_val(p)}")
         lines.append("")
 
     out_path.write_text("\n".join(lines), encoding="utf-8")

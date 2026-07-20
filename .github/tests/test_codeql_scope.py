@@ -227,7 +227,7 @@ class TestWriteScopedConfig:
         assert "  - core/json/utils.py" in text
         assert "  - core/llm/client.py" in text
         assert "paths-ignore:" in text
-        assert "  - test/**" in text
+        assert "  - 'test/**'" in text
 
     def test_full_scan_no_paths(self, tmp_path):
         out = tmp_path / "full.yml"

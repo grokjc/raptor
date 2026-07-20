@@ -34,6 +34,7 @@ env:
   PYTHON_VERSION: '3.12'
   VENV_PATH: .venv
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  RAPTOR_RANDOMISE_TESTS: ${{ github.run_id }}
 
 jobs:
   slow-integration:
