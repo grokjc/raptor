@@ -90,6 +90,7 @@ jobs:
           PYTEST_EXTRA: ${{ inputs.pytest_args }}
           PYTEST_ADDOPTS: "-o faulthandler_timeout=120"
           RAPTOR_MAX_TEST_SECONDS: "10"
+          RAPTOR_RANDOMISE_TESTS: ${{ github.run_id }}
         run: |
           set -f  # word-split $PYTEST_EXTRA without glob expansion
           python -m pytest $TEST_PATH $PYTEST_EXTRA
@@ -125,6 +126,7 @@ jobs:
           PYTEST_EXTRA: ${{ inputs.pytest_args }}
           PYTEST_ADDOPTS: "-o faulthandler_timeout=120"
           RAPTOR_MAX_TEST_SECONDS: "10"
+          RAPTOR_RANDOMISE_TESTS: ${{ github.run_id }}
         run: |
           set -f  # word-split $PYTEST_EXTRA without glob expansion
           python -m pytest $TEST_PATH $PYTEST_EXTRA
