@@ -179,6 +179,16 @@ jobs:
         run: |
           python3 .github/scripts/compute_filters.py
 
+      # Stash the changed-file list so the analyze matrix can build
+      # an import-graph-scoped CodeQL config for Python.
+      - name: Upload changed-file list
+        if: steps.changed_files.outputs.list != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # was v7.0.1
+        with:
+          name: changed-files
+          path: ${{ steps.changed_files.outputs.list }}
+          retention-days: 1
+
   # Run analyses in parallel; SARIF stashed as artifacts. No upload
   # happens here — the barrier job below collects all three and
   # delivers them atomically.
@@ -245,14 +255,48 @@ jobs:
         with:
           persist-credentials: false
 
+      # Python import-graph scoping: build a dynamic CodeQL config
+      # that restricts extraction + queries to changed files and
+      # their transitive dependents.  Falls back to full scan when
+      # the closure exceeds 60% of the codebase or when no changed-
+      # file list is available (schedule / workflow_dispatch).
+      # Non-Python matrix entries skip this and use the base config.
+      # Scoping is PR-only.  Push-to-main, schedule, and
+      # workflow_dispatch always get a full scan (safety net).
+      - name: Download changed-file list
+        if: steps.gate.outputs.run == 'true' && matrix.language == 'python' && github.event_name == 'pull_request'
+        id: dl_changed
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # was v4.3.0
+        with:
+          name: changed-files
+          path: /tmp/changed-files
+        continue-on-error: true
+
+      - name: Compute scoped Python config
+        if: steps.gate.outputs.run == 'true' && matrix.language == 'python' && github.event_name == 'pull_request'
+        id: scope
+        run: |
+          set -euo pipefail
+          changed_arg=""
+          if [[ -f /tmp/changed-files/changed_files.txt ]]; then
+            changed_arg="--changed-files /tmp/changed-files/changed_files.txt"
+          fi
+          python3 .github/scripts/codeql_scope.py \
+            $changed_arg \
+            --base-config .github/codeql/codeql-config.yml \
+            --out .github/codeql/codeql-scoped-config.yml \
+            --repo .
+
       # Initializes the CodeQL tools for scanning.
+      # Python uses the import-graph-scoped config when available;
+      # other languages use the base config.
       - name: Initialize CodeQL
         if: steps.gate.outputs.run == 'true'
         uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9  # was v4.37.0
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-          config-file: ./.github/codeql/codeql-config.yml
+          config-file: ${{ (matrix.language == 'python' && steps.scope.outputs.codeql_scope_mode == 'scoped') && './.github/codeql/codeql-scoped-config.yml' || './.github/codeql/codeql-config.yml' }}
 
       - name: Run manual build steps
         if: steps.gate.outputs.run == 'true' && matrix.build-mode == 'manual'
