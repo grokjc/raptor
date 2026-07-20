@@ -31,7 +31,7 @@ Called from ``/understand --map`` post-processing when
 absent.
 """
 
-from __future__ import enrichments
+from __future__ import annotations
 
 import hashlib
 import json
