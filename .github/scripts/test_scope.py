@@ -267,6 +267,15 @@ def compute_tier_dispatch(
     )
     result["_deps"] = {"run": deps_needed, "files": []}
 
+    n_changed = len(changed_py)
+    n_dependents = len(closure) - n_changed
+    result["_stats"] = {
+        "closure": len(closure),
+        "total": total,
+        "changed": n_changed,
+        "dependents": n_dependents,
+    }
+
     return result
 
 
@@ -347,7 +356,15 @@ def main() -> int:
     active = sum(1 for t, i in result.items()
                  if not t.startswith("_") and i["run"])
     total_tiers = len([t for t in result if not t.startswith("_")])
-    notice = f"{active}/{total_tiers} tiers active"
+    stats = result.get("_stats", {})
+    closure_n = stats.get("closure", 0)
+    total_files = stats.get("total", 0)
+    n_changed = stats.get("changed", 0)
+    n_deps = stats.get("dependents", 0)
+    pct = f"{closure_n / total_files * 100:.0f}%" if total_files else "?"
+    notice = (f"scoped to {closure_n}/{total_files} files ({pct})"
+              f" — {n_changed} changed, {n_deps} dependents"
+              f"; {active}/{total_tiers} tiers active")
     print(f"::notice::Test scope: {notice}")
     set_output("scope_summary", notice)
 
