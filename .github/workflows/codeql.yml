@@ -261,10 +261,10 @@ jobs:
       # the closure exceeds 60% of the codebase or when no changed-
       # file list is available (schedule / workflow_dispatch).
       # Non-Python matrix entries skip this and use the base config.
-      # Scoping is PR-only.  Push-to-main, schedule, and
+      # Scoping applies to PRs and push-to-main.  Schedule and
       # workflow_dispatch always get a full scan (safety net).
       - name: Download changed-file list
-        if: steps.gate.outputs.run == 'true' && matrix.language == 'python' && github.event_name == 'pull_request'
+        if: steps.gate.outputs.run == 'true' && matrix.language == 'python' && (github.event_name == 'pull_request' || github.event_name == 'push')
         id: dl_changed
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # was v4.3.0
         with:
@@ -273,7 +273,7 @@ jobs:
         continue-on-error: true
 
       - name: Compute scoped Python config
-        if: steps.gate.outputs.run == 'true' && matrix.language == 'python' && github.event_name == 'pull_request'
+        if: steps.gate.outputs.run == 'true' && matrix.language == 'python' && (github.event_name == 'pull_request' || github.event_name == 'push')
         id: scope
         run: |
           set -euo pipefail
