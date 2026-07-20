@@ -281,12 +281,9 @@ def dispatch_task(
             try:
                 model_name = max(
                     named_models,
-                    key=lambda m: cost_tracker.estimate_call_cost(m.model_name),
+                    key=lambda m: cost_tracker.estimate_cost(1, model_name=m.model_name),
                 ).model_name
             except (AttributeError, TypeError):
-                # Older cost trackers without estimate_call_cost
-                # — fall back to the primary's rate. Same behaviour
-                # as pre-fix for that case.
                 model_name = named_models[0].model_name
         else:
             model_name = ""
