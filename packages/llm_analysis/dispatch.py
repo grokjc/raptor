@@ -275,9 +275,7 @@ def dispatch_task(
         # (CC path) — should_skip_phase handles unknown.
         named_models = [m for m in models if m is not None]
         if named_models:
-            # cost_tracker.estimate_call_cost returns USD per call
-            # for the named model; pick the model with the highest
-            # estimated rate.
+            # Pick the model with the highest estimated per-call rate.
             try:
                 model_name = max(
                     named_models,

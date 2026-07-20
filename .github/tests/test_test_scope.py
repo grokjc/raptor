@@ -140,7 +140,7 @@ class TestOnRealRepo:
         assert result["sca"]["run"]
         assert len(result["sca"]["files"]) > 0
         non_sca = [t for t, i in result.items()
-                   if t not in ("sca", "_deps") and i["run"]]
+                   if t != "sca" and not t.startswith("_") and i["run"]]
         assert len(non_sca) == 0, f"SCA-only change triggered: {non_sca}"
 
     def test_ci_script_change_triggers_ci_lint(self, repo):

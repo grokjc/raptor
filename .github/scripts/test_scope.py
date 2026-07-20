@@ -198,8 +198,8 @@ def compute_tier_dispatch(
 
     closure = transitive_dependents(changed_py, reverse_graph)
 
-    print(f"Closure: {len(closure)}/{total} files "
-          f"({len(closure) / total * 100:.0f}%)")
+    pct = f"{len(closure) / total * 100:.0f}%" if total else "?"
+    print(f"Closure: {len(closure)}/{total} files ({pct})")
 
     result: dict[str, dict] = {}
 
