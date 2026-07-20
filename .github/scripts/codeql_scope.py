@@ -377,9 +377,14 @@ def write_scoped_config(
         return f"'{v}'" if "*" in v else v
 
     if scoped_paths is not None:
+        # CodeQL's Python extractor (walk_dir in
+        # exclude_pip_21_3_build_dir_options) treats each paths: entry as a
+        # directory to walk — file-level paths crash with NotADirectoryError.
+        # Deduplicate to parent directories instead.
+        dirs = sorted(set(str(Path(p).parent) or "." for p in scoped_paths))
         lines.append("paths:")
-        for p in sorted(scoped_paths):
-            lines.append(f"  - {_yaml_val(p)}")
+        for d in dirs:
+            lines.append(f"  - {_yaml_val(d)}")
         lines.append("")
 
     pi = base_config.get("paths-ignore", [])

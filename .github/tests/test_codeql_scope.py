@@ -224,8 +224,9 @@ class TestWriteScopedConfig:
         )
         text = out.read_text(encoding="utf-8")
         assert "paths:" in text
-        assert "  - core/json/utils.py" in text
-        assert "  - core/llm/client.py" in text
+        # write_scoped_config deduplicates to parent directories
+        assert "  - core/json" in text
+        assert "  - core/llm" in text
         assert "paths-ignore:" in text
         assert "  - 'test/**'" in text
 
