@@ -348,6 +348,7 @@ def _pinned_llm_config(model_name: str) -> 'LLMConfig':
     from dataclasses import replace
     from core.llm.config import (
         ModelConfig,
+        MODEL_LIMITS,
         _PROVIDER_BUILDERS,
         _get_configured_models,
     )
@@ -371,6 +372,13 @@ def _pinned_llm_config(model_name: str) -> 'LLMConfig':
     #      (the previous version silently skipped this path and produced
     #      auth failures when the operator's credentials lived only in
     #      the config file)
+    from core.llm.model_data import _strip_dated_alias
+    limits = MODEL_LIMITS.get(model_name) or MODEL_LIMITS.get(
+        _strip_dated_alias(model_name), {},
+    )
+    max_tokens = limits.get("max_output", 4096)
+    max_context = limits.get("max_context", 32000)
+
     builder = _PROVIDER_BUILDERS.get(provider)
     base = builder() if builder is not None else None
     if base is None:
@@ -381,12 +389,18 @@ def _pinned_llm_config(model_name: str) -> 'LLMConfig':
                     model_name=entry.get("model", model_name),
                     api_key=entry["api_key"],
                     api_base=entry.get("api_base"),
+                    max_tokens=max_tokens,
+                    max_context=max_context,
                 )
                 break
     if base is None:
-        primary = ModelConfig(provider=provider, model_name=model_name, role="code")
+        primary = ModelConfig(
+            provider=provider, model_name=model_name, role="code",
+            max_tokens=max_tokens, max_context=max_context,
+        )
     else:
-        primary = replace(base, model_name=model_name, role="code")
+        primary = replace(base, model_name=model_name, role="code",
+                          max_tokens=max(base.max_tokens, max_tokens))
     return LLMConfig(primary_model=primary, fallback_models=[])
 
 

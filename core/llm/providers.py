@@ -362,8 +362,10 @@ class LLMProvider(ABC):
         Use a class-level set so the warn-once persists across
         instances of the same provider.
         """
-        from .model_data import MODEL_COSTS
-        rates = MODEL_COSTS.get(self.config.model_name)
+        from .model_data import MODEL_COSTS, _strip_dated_alias
+        rates = MODEL_COSTS.get(self.config.model_name) or MODEL_COSTS.get(
+            _strip_dated_alias(self.config.model_name),
+        )
         if not rates:
             rate = self.config.cost_per_1k_tokens or 0.0
             # ``math.isclose`` with abs_tol collapses ±epsilon to
@@ -415,6 +417,12 @@ class LLMProvider(ABC):
             f"Return ONLY valid JSON, no other text."
         )
         response = self.generate(augmented_prompt, system_prompt)
+        if response.finish_reason in ("max_tokens", "length"):
+            raise json.JSONDecodeError(
+                "Response truncated (output token limit reached)",
+                response.content[:200] if response.content else "",
+                0,
+            )
         try:
             content = response.content.strip()
             # Strip markdown fences: ```json\n...\n``` or ```\n...\n```
@@ -2272,12 +2280,28 @@ class GeminiProvider(LLMProvider):
         normalized = _normalize_schema(schema)
         pydantic_model = _dict_schema_to_pydantic(normalized)
 
+        max_out = self.config.max_tokens
         config_kwargs = {
             "temperature": kwargs.get("temperature", self.config.temperature),
-            "max_output_tokens": self.config.max_tokens,
+            "max_output_tokens": max_out,
             "response_mime_type": "application/json",
             "response_schema": _schema_to_gemini(normalized),
         }
+
+        if max_out >= 16384:
+            try:
+                from google.genai.types import ThinkingConfig
+                raw_budget = max_out - 16384
+                if "flash" in self.config.model_name.lower():
+                    budget = min(raw_budget, 24576)
+                else:
+                    budget = min(raw_budget, 32768)
+                budget = max(budget, 128)
+                config_kwargs["thinking_config"] = ThinkingConfig(
+                    thinkingBudget=budget,
+                )
+            except (ImportError, TypeError):
+                pass
 
         contents = [{"role": "user", "parts": [{"text": prompt}]}]
         generate_kwargs = {
