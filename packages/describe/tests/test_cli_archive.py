@@ -137,17 +137,20 @@ class TestArchiveHandling:
         doc = json.loads(out_buf.getvalue())
         assert doc["archive_label"] is None
 
-    def test_temp_dir_cleaned_up_after_archive_describe(self, tmp_path):
-        # After a successful archive-describe, no raptor-describe-*
-        # temp dirs should remain under the system tmp.
+    def test_temp_dir_cleaned_up_after_archive_describe(
+        self, tmp_path, monkeypatch,
+    ):
+        # Isolate from parallel xdist workers whose raptor-describe-*
+        # dirs in shared /tmp would appear as false-positive leaks.
         import tempfile as _tmp
+        private_tmp = tmp_path / "systmp"
+        private_tmp.mkdir()
+        monkeypatch.setattr(_tmp, "tempdir", str(private_tmp))
+
         src = tmp_path / "proj"
         _make_c_daemon_source(src)
         archive = tmp_path / "proj.tar.gz"
         _make_tarball(src, archive)
-
-        sys_tmp = Path(_tmp.gettempdir())
-        before = set(sys_tmp.glob("raptor-describe-*"))
 
         out_buf = io.StringIO()
         err_buf = io.StringIO()
@@ -157,8 +160,7 @@ class TestArchiveHandling:
         )
         assert rc == 0, err_buf.getvalue()
 
-        after = set(sys_tmp.glob("raptor-describe-*"))
-        leaked = after - before
+        leaked = set(private_tmp.glob("raptor-describe-*"))
         assert not leaked, (
             f"temp extract dirs leaked: {leaked}"
         )
