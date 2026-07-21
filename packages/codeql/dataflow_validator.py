@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 from core.smt_solver import BVProfile
-from packages.codeql.smt_path_validator import (
+from core.smt_solver.path_feasibility import (
     PathCondition,
     check_path_feasibility,
 )

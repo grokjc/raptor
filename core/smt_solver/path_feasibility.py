@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """
-SMT-based path condition feasibility checker for CodeQL dataflow findings.
+SMT-based path condition feasibility checker.
 
-The LLM extracts branch conditions from a dataflow path as structured
-constraint strings; this module encodes them into Z3 bitvector expressions
-and checks whether they are jointly satisfiable.
+Shared module: consumed by packages/codeql (dataflow validation),
+core/audit (post-deepen mechanical gates), and future SMT consumers.
+
+Callers extract branch/guard conditions as structured constraint strings;
+this module encodes them into Z3 bitvector expressions and checks whether
+they are jointly satisfiable.
 
 - sat   → path is reachable; model gives concrete variable values for PoC
 - unsat → path conditions are mutually exclusive (likely false positive);
