@@ -1,9 +1,17 @@
-"""Evidence primitives for black-box binary analysis.
+"""Unified evidence primitives for RAPTOR.
 
-The binary pipeline is deliberately stricter than a source-code map. A
-decompiler can suggest a shape, but it cannot prove attacker control or a
-trust-boundary bypass on its own. Every record emitted by this package carries
-the observation that justified it and the strength of that observation.
+Every finding, observation, and annotation across RAPTOR carries an
+evidence tier that grades how close the observation is to ground truth.
+This module is the canonical home for that vocabulary.
+
+Tier ordering (strongest to weakest):
+    OBSERVED_RUNTIME  — Frida/runtime instrumentation saw it happen
+    REPLAYED_CRASH    — ASan/fuzz witness reproduced the bug
+    SMT_PROVED        — Z3/SMT solver proved the constraint (un)satisfiable
+    XREF_BACKED       — CPG/dataflow/call-graph structural guarantee
+    HEADER_BACKED     — ELF/Mach-O headers, symbol tables, AST extraction
+    DECOMPILER_INFERRED — decompiled pseudo-code (approximate)
+    HEURISTIC         — LLM inference, naming heuristic, pattern match
 """
 
 from __future__ import annotations
@@ -25,6 +33,23 @@ class EvidenceTier(str, Enum):
     HEADER_BACKED = "header_backed"
     DECOMPILER_INFERRED = "decompiler_inferred"
     HEURISTIC = "heuristic"
+
+
+# Ordered strongest-to-weakest for comparison.
+TIER_RANK: dict[EvidenceTier, int] = {
+    EvidenceTier.OBSERVED_RUNTIME: 6,
+    EvidenceTier.REPLAYED_CRASH: 5,
+    EvidenceTier.SMT_PROVED: 4,
+    EvidenceTier.XREF_BACKED: 3,
+    EvidenceTier.HEADER_BACKED: 2,
+    EvidenceTier.DECOMPILER_INFERRED: 1,
+    EvidenceTier.HEURISTIC: 0,
+}
+
+
+def stronger(a: EvidenceTier, b: EvidenceTier) -> EvidenceTier:
+    """Return whichever tier is closer to ground truth."""
+    return a if TIER_RANK[a] >= TIER_RANK[b] else b
 
 
 @dataclass(frozen=True)
@@ -108,6 +133,8 @@ def make_evidence(
 __all__ = [
     "EvidenceRecord",
     "EvidenceTier",
+    "TIER_RANK",
     "evidence_id",
     "make_evidence",
+    "stronger",
 ]
