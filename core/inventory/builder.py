@@ -393,6 +393,16 @@ def build_inventory(
     if limitations:
         inventory['limitations'] = limitations
 
+    has_c_cpp = any(
+        f.get("language") in ("c", "cpp")
+        for f in files_info
+    )
+    if has_c_cpp:
+        from .header_api import scan_public_api
+        header_names = scan_public_api(str(target))
+        if header_names:
+            inventory['header_api'] = sorted(header_names)
+
     # Binary-oracle enrichment (Inc 4 + Phase 4 multi-binary) — opt-in
     # via the process-wide ``RaptorConfig.BINARY_ORACLE_PATHS`` (set by
     # ``raptor_agentic`` / ``raptor_codeql``'s repeatable ``--binary``
@@ -448,7 +458,7 @@ def build_inventory(
                 # Carry forward checked_by only for unchanged files
                 _carry_forward_coverage(old_inventory, inventory, modified=set(diff['modified']))
         except (KeyError, TypeError):
-            pass  # Incompatible old inventory
+            logger.debug("incompatible old inventory, skipping diff", exc_info=True)
 
     from core.inventory import save_checklist
     save_checklist(str(output_path), inventory)
