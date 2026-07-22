@@ -11,6 +11,11 @@ name: Nightly (slow + integration)
 #                    GitHub (may flake on external outages; failures
 #                    red-fail the run so they are investigated).
 #
+# The default-tier tests (not slow, not integration) already run per-PR
+# in tests.yml but only once per seed.  Here we re-run them 10x with
+# distinct random seeds to flush out order-dependent failures cheaply —
+# the fast suite completes in seconds per iteration.
+#
 # Deliberately a standalone workflow, NOT a job in tests.yml: it must
 # never ride tests.yml's `merge_group` force_full path — the merge queue
 # must not block on a live-API hiccup or a multi-minute perf baseline.
@@ -34,15 +39,14 @@ env:
   PYTHON_VERSION: '3.12'
   VENV_PATH: .venv
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # Number of shuffled slow-test iterations per nightly. Setup runs
-  # once; each iteration re-runs the suite with a different seed so
-  # order-dependent failures surface fast without extra runner cost.
-  SLOW_ITERATIONS: '10'
+  # Number of shuffled default-tier iterations per nightly.  The fast
+  # suite runs in seconds, so 10 iterations adds ~minutes not hours.
+  FAST_ITERATIONS: '10'
 
 jobs:
   slow-integration:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 60
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # was v7.0.0
@@ -103,27 +107,34 @@ jobs:
           /usr/lib/llvm-21/bin/llvm-cov --version || true
           /usr/lib/llvm-21/bin/llvm-profdata --version || true
 
-      - name: Run slow tests (10 shuffled iterations)
+      - name: Run slow tests (single pass, shuffled)
+        env:
+          RAPTOR_RANDOMISE_TESTS: ${{ github.run_id }}
+        run: |
+          source $VENV_PATH/bin/activate
+          python -m pytest -m slow core packages --durations=25
+
+      - name: Run default-tier tests (10 shuffled iterations)
         run: |
           source $VENV_PATH/bin/activate
           failed=0
-          for i in $(seq 1 "$SLOW_ITERATIONS"); do
+          for i in $(seq 1 "$FAST_ITERATIONS"); do
             seed="${{ github.run_id }}-${i}"
             echo ""
-            echo "::group::Slow iteration ${i}/${SLOW_ITERATIONS} (seed=${seed})"
+            echo "::group::Fast iteration ${i}/${FAST_ITERATIONS} (seed=${seed})"
             rc=0
             RAPTOR_RANDOMISE_TESTS="$seed" \
-              python -m pytest -m slow core packages --durations=25 \
-              --tb=short --junitxml="$RUNNER_TEMP/slow-iter-${i}.xml" \
+              python -m pytest core packages --durations=25 \
+              --tb=short --junitxml="$RUNNER_TEMP/fast-iter-${i}.xml" \
               || rc=$?
             echo "::endgroup::"
             if [ "$rc" -ne 0 ]; then
-              echo "::error::Slow iteration ${i} failed (seed=${seed}, exit ${rc})"
+              echo "::error::Fast iteration ${i} failed (seed=${seed}, exit ${rc})"
               failed=$((failed + 1))
             fi
           done
           echo ""
-          echo "Slow tests: $((SLOW_ITERATIONS - failed))/${SLOW_ITERATIONS} iterations passed"
+          echo "Default-tier tests: $((FAST_ITERATIONS - failed))/${FAST_ITERATIONS} iterations passed"
           if [ "$failed" -gt 0 ]; then
             exit 1
           fi
@@ -158,7 +169,7 @@ jobs:
         with:
           name: nightly-test-results
           path: |
-            ${{ runner.temp }}/slow-iter-*.xml
+            ${{ runner.temp }}/fast-iter-*.xml
             ${{ runner.temp }}/integration-attempt-*.xml
           retention-days: 14
           if-no-files-found: ignore
