@@ -46,12 +46,12 @@ def _llm_callable_from_client(llm_client) -> Optional[Any]:
             )
             return data
         except Exception as e:
-            logger.debug(f"checker_synthesis LLM call failed: {e}")
+            logger.warning("checker_synthesis LLM call failed: %s", e)
             return None
     return _call
 
 
-def _seed_from_vuln(vuln) -> Optional[Any]:
+def _seed_from_vuln(vuln, repo_root: Optional[Path] = None) -> Optional[Any]:
     """Build a ``SeedBug`` from a confirmed-exploitable
     ``VulnerabilityContext``. Returns None if the vuln lacks the
     fields needed to seed synthesis (no file_path, no line range,
@@ -65,6 +65,15 @@ def _seed_from_vuln(vuln) -> Optional[Any]:
         end_line = start_line
     if not file_path or start_line is None or end_line is None:
         return None
+
+    # SARIF findings may carry absolute paths; synthesis requires
+    # repo-relative paths (the path-traversal defence rejects absolutes).
+    fp = Path(file_path)
+    if fp.is_absolute() and repo_root is not None:
+        try:
+            file_path = str(fp.relative_to(Path(repo_root).resolve()))
+        except ValueError:
+            return None
 
     # Function name: prefer inventory-resolved metadata, fall back
     # to whatever the upstream finding adapter populated.
@@ -162,10 +171,18 @@ def emit_variant_annotations_for_finding(
     max_matches: int = 10,
     triage_each: bool = True,
     max_triage_calls: int = 10,
+    refine: bool = True,
+    max_refine_iterations: int = 5,
+    max_acceptable_fp_rate: float = 0.2,
 ) -> int:
     """For a confirmed exploitable finding, synthesise a checker
     rule, run it across ``repo_root``, and emit ``suspicious``
     annotations for every variant match.
+
+    When ``refine=True`` (default), runs the iterative FP-elimination
+    loop: each iteration feeds false positives back as negative
+    examples until the FP rate drops below ``max_acceptable_fp_rate``
+    or ``max_refine_iterations`` is exhausted.
 
     Returns the count of annotations actually written. Skipped
     silently when:
@@ -180,29 +197,71 @@ def emit_variant_annotations_for_finding(
     hunting failed.
     """
     try:
-        seed = _seed_from_vuln(vuln)
+        seed = _seed_from_vuln(vuln, repo_root=repo_root)
         if seed is None:
+            logger.debug(
+                "checker_followup: skipped — could not build seed "
+                "(missing file/line/function)",
+            )
             return 0
 
         llm_callable = _llm_callable_from_client(llm_client)
         if llm_callable is None:
+            logger.debug(
+                "checker_followup: skipped — LLM client does not "
+                "support generate_structured",
+            )
             return 0
 
-        from packages.checker_synthesis import synthesise_and_run
-        result = synthesise_and_run(
-            seed,
-            repo_root=repo_root,
-            out_dir=out_dir,
-            llm=llm_callable,
-            max_matches=max_matches,
-            triage_each=triage_each,
-            max_triage_calls=max_triage_calls,
+        logger.debug(
+            "checker_followup: synthesising rule for %s:%s (%s)",
+            seed.file, seed.line_start, seed.function,
         )
+
+        if refine:
+            from packages.checker_synthesis import synthesise_with_refinement
+            result = synthesise_with_refinement(
+                seed,
+                repo_root=repo_root,
+                out_dir=out_dir,
+                llm=llm_callable,
+                max_iterations=max_refine_iterations,
+                max_acceptable_fp_rate=max_acceptable_fp_rate,
+                max_matches=max_matches,
+                max_triage_calls=max_triage_calls,
+            )
+        else:
+            from packages.checker_synthesis import synthesise_and_run
+            result = synthesise_and_run(
+                seed,
+                repo_root=repo_root,
+                out_dir=out_dir,
+                llm=llm_callable,
+                max_matches=max_matches,
+                triage_each=triage_each,
+                max_triage_calls=max_triage_calls,
+            )
     except Exception:
-        logger.debug("checker_followup: synthesis failed", exc_info=True)
+        logger.warning("checker_followup: synthesis failed", exc_info=True)
         return 0
 
-    if result.rule is None or not result.matches:
+    if result.rule is None:
+        logger.debug(
+            "checker_followup: no rule produced for %s:%s "
+            "(errors: %s)",
+            seed.file, seed.line_start,
+            "; ".join(result.errors[:3]) if result.errors else "none",
+        )
+        return 0
+    logger.debug(
+        "checker_followup: rule %s produced — %d match(es), "
+        "positive_control=%s, dual_control=%s",
+        result.rule.rule_id,
+        len(result.matches),
+        result.positive_control,
+        result.dual_control,
+    )
+    if not result.matches:
         return 0
 
     return _emit_variants(
@@ -270,9 +329,10 @@ def _emit_variants(
                 base_dir, ann, overwrite="respect-manual",
             )
         except Exception:
-            logger.debug(
-                f"checker_followup: variant annotation write failed for "
-                f"{m.file}:{m.line}",
+            logger.warning(
+                "checker_followup: variant annotation write failed "
+                "for %s:%s",
+                m.file, m.line,
                 exc_info=True,
             )
             continue

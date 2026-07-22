@@ -51,6 +51,7 @@ def _patch_synth(monkeypatch, *, rule, matches, triage=()):
             positive_control=True,
         )
     monkeypatch.setattr(cs_mod, "synthesise_and_run", _fake)
+    monkeypatch.setattr(cs_mod, "synthesise_with_refinement", _fake)
 
 
 def _multi_function_checklist(file_path, names_with_lines):

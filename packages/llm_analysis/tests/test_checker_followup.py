@@ -120,6 +120,26 @@ class TestSeedFromVuln:
         seed = _seed_from_vuln(v)
         assert "scanner msg" in seed.reasoning
 
+    def test_absolute_path_normalised_to_relative(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        v = StubVuln(
+            file_path=str(repo / "src" / "auth.py"),
+            metadata={"name": "login"},
+        )
+        seed = _seed_from_vuln(v, repo_root=repo)
+        assert seed is not None
+        assert seed.file == "src/auth.py"
+
+    def test_absolute_path_outside_repo_returns_none(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        v = StubVuln(
+            file_path="/elsewhere/auth.py",
+            metadata={"name": "login"},
+        )
+        assert _seed_from_vuln(v, repo_root=repo) is None
+
 
 class TestLLMCallableFromClient:
     def test_returns_callable_for_real_client(self):
@@ -169,8 +189,8 @@ class TestResolveMatchFunction:
 
 
 def _patch_synth(monkeypatch, *, rule, matches, triage=()):
-    """Replace ``synthesise_and_run`` with a fixture that returns a
-    canned ``CheckerSynthesisResult``."""
+    """Replace ``synthesise_and_run`` and ``synthesise_with_refinement``
+    with a fixture that returns a canned ``CheckerSynthesisResult``."""
     from packages.checker_synthesis import (
         CheckerSynthesisResult,
     )
@@ -184,10 +204,9 @@ def _patch_synth(monkeypatch, *, rule, matches, triage=()):
             positive_control=True,
         )
 
-    # synthesise_and_run is imported lazily inside the function.
-    # Patch the symbol that the helper imports.
     import packages.checker_synthesis as cs_mod
     monkeypatch.setattr(cs_mod, "synthesise_and_run", _fake)
+    monkeypatch.setattr(cs_mod, "synthesise_with_refinement", _fake)
 
 
 class TestEmitVariantAnnotations:
@@ -370,12 +389,96 @@ class TestEmitVariantAnnotations:
             raise RuntimeError("simulated synth failure")
 
         monkeypatch.setattr(cs_mod, "synthesise_and_run", boom)
+        monkeypatch.setattr(cs_mod, "synthesise_with_refinement", boom)
         # Must not raise.
         n = emit_variant_annotations_for_finding(
             v, out_dir=tmp_path, checklist=_checklist(),
             repo_root=tmp_path, llm_client=StubLLMClient(),
         )
         assert n == 0
+
+    def test_refine_true_calls_refinement(self, tmp_path, monkeypatch):
+        """refine=True must route to synthesise_with_refinement."""
+        from packages.checker_synthesis import (
+            CheckerSynthesisResult, SynthesisedRule, Match,
+        )
+        import packages.checker_synthesis as cs_mod
+
+        called = {"and_run": False, "with_refinement": False}
+
+        def _result(seed):
+            return CheckerSynthesisResult(
+                seed=seed,
+                rule=SynthesisedRule(
+                    engine="semgrep", rule_id="t.0", body="r",
+                ),
+                matches=[Match(file="src/v.py", line=5)],
+                positive_control=True,
+            )
+
+        def _track_and_run(*a, **kw):
+            called["and_run"] = True
+            return _result(kw.get("seed") or a[0])
+
+        def _track_with_refinement(*a, **kw):
+            called["with_refinement"] = True
+            return _result(kw.get("seed") or a[0])
+
+        monkeypatch.setattr(cs_mod, "synthesise_and_run", _track_and_run)
+        monkeypatch.setattr(
+            cs_mod, "synthesise_with_refinement", _track_with_refinement,
+        )
+
+        v = StubVuln(metadata={"name": "login"})
+        emit_variant_annotations_for_finding(
+            v, out_dir=tmp_path, checklist=_checklist(),
+            repo_root=tmp_path, llm_client=StubLLMClient(),
+            refine=True,
+        )
+        assert called["with_refinement"], "refine=True did not call refinement"
+        assert not called["and_run"], "refine=True should not call single-shot"
+
+    def test_refine_false_calls_single_shot(self, tmp_path, monkeypatch):
+        """refine=False must route to synthesise_and_run."""
+        from packages.checker_synthesis import (
+            CheckerSynthesisResult, SynthesisedRule, Match,
+        )
+        import packages.checker_synthesis as cs_mod
+
+        called = {"and_run": False, "with_refinement": False}
+
+        def _result(seed):
+            return CheckerSynthesisResult(
+                seed=seed,
+                rule=SynthesisedRule(
+                    engine="semgrep", rule_id="t.0", body="r",
+                ),
+                matches=[Match(file="src/v.py", line=5)],
+                positive_control=True,
+            )
+
+        def _track_and_run(*a, **kw):
+            called["and_run"] = True
+            return _result(kw.get("seed") or a[0])
+
+        def _track_with_refinement(*a, **kw):
+            called["with_refinement"] = True
+            return _result(kw.get("seed") or a[0])
+
+        monkeypatch.setattr(cs_mod, "synthesise_and_run", _track_and_run)
+        monkeypatch.setattr(
+            cs_mod, "synthesise_with_refinement", _track_with_refinement,
+        )
+
+        v = StubVuln(metadata={"name": "login"})
+        emit_variant_annotations_for_finding(
+            v, out_dir=tmp_path, checklist=_checklist(),
+            repo_root=tmp_path, llm_client=StubLLMClient(),
+            refine=False,
+        )
+        assert called["and_run"], "refine=False did not call single-shot"
+        assert not called["with_refinement"], \
+            "refine=False should not call refinement"
 
 
 # ---------------------------------------------------------------------------
