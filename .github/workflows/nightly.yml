@@ -34,20 +34,15 @@ env:
   PYTHON_VERSION: '3.12'
   VENV_PATH: .venv
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # Number of shuffled slow-test iterations per nightly. Setup runs
+  # once; each iteration re-runs the suite with a different seed so
+  # order-dependent failures surface fast without extra runner cost.
+  SLOW_ITERATIONS: '10'
 
 jobs:
   slow-integration:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        # Three shuffled iterations per nightly — different seed each,
-        # so order-dependent failures surface faster.  fail-fast: false
-        # ensures every iteration completes even when one fails.
-        iteration: [1, 2, 3]
-    env:
-      RAPTOR_RANDOMISE_TESTS: ${{ github.run_id }}-${{ matrix.iteration }}
+    timeout-minutes: 120
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # was v7.0.0
@@ -108,11 +103,30 @@ jobs:
           /usr/lib/llvm-21/bin/llvm-cov --version || true
           /usr/lib/llvm-21/bin/llvm-profdata --version || true
 
-      - name: Run slow tests (shuffled — seed in RAPTOR_RANDOMISE_TESTS)
+      - name: Run slow tests (10 shuffled iterations)
         run: |
           source $VENV_PATH/bin/activate
-          # CLI -m overrides pytest.ini's default deselect.
-          python -m pytest -m slow core packages --durations=25
+          failed=0
+          for i in $(seq 1 "$SLOW_ITERATIONS"); do
+            seed="${{ github.run_id }}-${i}"
+            echo ""
+            echo "::group::Slow iteration ${i}/${SLOW_ITERATIONS} (seed=${seed})"
+            rc=0
+            RAPTOR_RANDOMISE_TESTS="$seed" \
+              python -m pytest -m slow core packages --durations=25 \
+              --tb=short --junitxml="$RUNNER_TEMP/slow-iter-${i}.xml" \
+              || rc=$?
+            echo "::endgroup::"
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::Slow iteration ${i} failed (seed=${seed}, exit ${rc})"
+              failed=$((failed + 1))
+            fi
+          done
+          echo ""
+          echo "Slow tests: $((SLOW_ITERATIONS - failed))/${SLOW_ITERATIONS} iterations passed"
+          if [ "$failed" -gt 0 ]; then
+            exit 1
+          fi
 
       - name: Run integration tests (live network — retry once on failure)
         # External-service outages (OSV/NVD/GitHub down or rate-limited)
@@ -138,11 +152,13 @@ jobs:
           python -m pytest -m integration core packages --durations=25 \
             --tb=short --junitxml="$RUNNER_TEMP/integration-attempt-2.xml"
 
-      - name: Upload integration test results
+      - name: Upload test results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: integration-test-results-${{ matrix.iteration }}
-          path: ${{ runner.temp }}/integration-attempt-*.xml
+          name: nightly-test-results
+          path: |
+            ${{ runner.temp }}/slow-iter-*.xml
+            ${{ runner.temp }}/integration-attempt-*.xml
           retention-days: 14
           if-no-files-found: ignore
