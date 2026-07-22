@@ -58,15 +58,18 @@ jobs:
           source $VENV_PATH/bin/activate
           for i in $(seq 1 "$FAST_ITERATIONS"); do
             seed="${{ github.run_id }}-${i}"
-            echo ""
-            echo "=========================================="
-            echo "  Iteration ${i}/${FAST_ITERATIONS}  (seed=${seed})"
-            echo "=========================================="
-            echo ""
+            echo "::group::Iteration ${i}/${FAST_ITERATIONS} (seed=${seed})"
+            rc=0
             RAPTOR_RANDOMISE_TESTS="$seed" \
               python -m pytest core packages \
               --durations=25 --tb=short \
-              --junitxml="$RUNNER_TEMP/fast-iter-${i}.xml"
+              --junitxml="$RUNNER_TEMP/fast-iter-${i}.xml" \
+              || rc=$?
+            echo "::endgroup::"
+            if [ "$rc" -ne 0 ]; then
+              echo "::error::Iteration ${i} failed (seed=${seed}, exit ${rc})"
+              exit "$rc"
+            fi
           done
           echo ""
           echo "All ${FAST_ITERATIONS} iterations passed."
