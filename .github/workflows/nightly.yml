@@ -34,12 +34,20 @@ env:
   PYTHON_VERSION: '3.12'
   VENV_PATH: .venv
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  RAPTOR_RANDOMISE_TESTS: ${{ github.run_id }}
 
 jobs:
   slow-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        # Three shuffled iterations per nightly — different seed each,
+        # so order-dependent failures surface faster.  fail-fast: false
+        # ensures every iteration completes even when one fails.
+        iteration: [1, 2, 3]
+    env:
+      RAPTOR_RANDOMISE_TESTS: ${{ github.run_id }}-${{ matrix.iteration }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # was v7.0.0
@@ -100,7 +108,7 @@ jobs:
           /usr/lib/llvm-21/bin/llvm-cov --version || true
           /usr/lib/llvm-21/bin/llvm-profdata --version || true
 
-      - name: Run slow tests (deterministic — failure is a real regression)
+      - name: Run slow tests (shuffled — seed in RAPTOR_RANDOMISE_TESTS)
         run: |
           source $VENV_PATH/bin/activate
           # CLI -m overrides pytest.ini's default deselect.
@@ -134,7 +142,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: integration-test-results
+          name: integration-test-results-${{ matrix.iteration }}
           path: ${{ runner.temp }}/integration-attempt-*.xml
           retention-days: 14
           if-no-files-found: ignore
