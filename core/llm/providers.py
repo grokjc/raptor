@@ -134,6 +134,8 @@ class LLMResponse:
     output_tokens: int = 0
     thinking_tokens: int = 0
     duration: float = 0.0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
     # The concrete model snapshot the provider actually served, lifted from
     # the SDK response when it exposes one (e.g. alias "gemini-2.5-pro" →
     # "gemini-2.5-pro-002"). None when the provider doesn't surface it — the
@@ -199,6 +201,8 @@ class LLMProvider(ABC):
         self.total_cost = 0.0
         self.call_count = 0
         self.total_duration = 0.0
+        self.total_cache_read_tokens = 0
+        self.total_cache_write_tokens = 0
         self._usage_lock = threading.Lock()
 
     @abstractmethod
@@ -331,23 +335,34 @@ class LLMProvider(ABC):
 
     def track_usage(self, tokens: int, cost: float,
                     input_tokens: int = 0, output_tokens: int = 0,
-                    duration: float = 0.0) -> None:
+                    duration: float = 0.0,
+                    cache_read_tokens: int = 0,
+                    cache_write_tokens: int = 0) -> None:
         """Track token usage, cost, and call duration (thread-safe)."""
         with self._usage_lock:
             self.total_tokens += tokens
             self.total_input_tokens += input_tokens
             self.total_output_tokens += output_tokens
+            self.total_cache_read_tokens += cache_read_tokens
+            self.total_cache_write_tokens += cache_write_tokens
             self.total_cost += (cost or 0.0)
             self.call_count += 1
             self.total_duration += duration
         logger.debug(f"LLM usage: {tokens} tokens, ${(cost or 0.0):.4f} (total: {self.total_tokens} tokens, ${self.total_cost:.4f})")
 
     def _calculate_cost_split(self, input_tokens: int, output_tokens: int,
-                              thinking_tokens: int = 0) -> float:
+                              thinking_tokens: int = 0,
+                              cache_read_tokens: int = 0,
+                              cache_write_tokens: int = 0) -> float:
         """Calculate cost using split input/output pricing.
 
         Thinking/reasoning tokens are billed at the output rate on all
         providers (OpenAI, Google, Anthropic).
+
+        When ``cache_read_tokens`` or ``cache_write_tokens`` are non-zero,
+        Anthropic cache multipliers (0.1x read, 1.25x write at the input
+        rate) are applied. Non-Anthropic providers never pass these so
+        the cost formula stays unchanged for them.
 
         Pre-fix the unknown-model fallback returned 0.0 silently when
         `cost_per_1k_tokens` was also 0 (the dataclass default). For
@@ -377,10 +392,18 @@ class LLMProvider(ABC):
             if math.isclose(rate, 0.0, abs_tol=1e-12):
                 self._warn_unknown_model_once(self.config.model_name)
             return ((input_tokens + output_tokens + thinking_tokens) / 1000) * rate
-        return (
+        base = (
             (input_tokens / 1000) * rates["input"]
             + ((output_tokens + thinking_tokens) / 1000) * rates["output"]
         )
+        if cache_read_tokens or cache_write_tokens:
+            from .model_data import (
+                ANTHROPIC_CACHE_READ_MULTIPLIER,
+                ANTHROPIC_CACHE_WRITE_MULTIPLIER,
+            )
+            base += (cache_read_tokens / 1000) * rates["input"] * ANTHROPIC_CACHE_READ_MULTIPLIER
+            base += (cache_write_tokens / 1000) * rates["input"] * ANTHROPIC_CACHE_WRITE_MULTIPLIER
+        return base
 
     # Class-level (NOT instance-level) so we warn once per model name
     # across the whole process, even when callers create fresh
@@ -1052,6 +1075,7 @@ class OpenAICompatibleProvider(LLMProvider):
             input_tokens = 0
             output_tokens = 0
             thinking_tokens = 0
+            cache_read_tokens = 0
             if response.usage:
                 input_tokens = response.usage.prompt_tokens or 0
                 output_tokens = response.usage.completion_tokens or 0
@@ -1062,11 +1086,17 @@ class OpenAICompatibleProvider(LLMProvider):
                     # Reasoning tokens are included in completion_tokens — subtract
                     # to get actual output tokens for display, but bill both as output
                     output_tokens = output_tokens - thinking_tokens
+                prompt_details = getattr(response.usage, 'prompt_tokens_details', None)
+                if prompt_details:
+                    cache_read_tokens = getattr(prompt_details, 'cached_tokens', 0) or 0
 
             tokens_used = input_tokens + output_tokens + thinking_tokens
             cost = self._calculate_cost_split(input_tokens, output_tokens, thinking_tokens)
 
-            self.track_usage(tokens_used, cost, input_tokens, output_tokens, duration)
+            self.track_usage(
+                tokens_used, cost, input_tokens, output_tokens, duration,
+                cache_read_tokens=cache_read_tokens,
+            )
             logger.debug(f"[OpenAI] model={self.config.model_name}, tokens={tokens_used}, cost=${cost:.4f}, duration={duration:.2f}s"
                          + (f", thinking={thinking_tokens}" if thinking_tokens else ""))
 
@@ -1081,6 +1111,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 output_tokens=output_tokens,
                 thinking_tokens=thinking_tokens,
                 duration=duration,
+                cache_read_tokens=cache_read_tokens,
                 resolved_model=extract_resolved_model(response),
             )
 
@@ -1143,6 +1174,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 input_tokens = 0
                 output_tokens = 0
                 thinking_tokens = 0
+                cache_read_tokens = 0
                 if completion.usage:
                     input_tokens = completion.usage.prompt_tokens or 0
                     output_tokens = completion.usage.completion_tokens or 0
@@ -1150,10 +1182,16 @@ class OpenAICompatibleProvider(LLMProvider):
                     if details:
                         thinking_tokens = getattr(details, 'reasoning_tokens', 0) or 0
                         output_tokens = output_tokens - thinking_tokens
+                    prompt_details = getattr(completion.usage, 'prompt_tokens_details', None)
+                    if prompt_details:
+                        cache_read_tokens = getattr(prompt_details, 'cached_tokens', 0) or 0
 
                 tokens_used = input_tokens + output_tokens + thinking_tokens
                 cost = self._calculate_cost_split(input_tokens, output_tokens, thinking_tokens)
-                self.track_usage(tokens_used, cost, input_tokens, output_tokens, duration)
+                self.track_usage(
+                    tokens_used, cost, input_tokens, output_tokens, duration,
+                    cache_read_tokens=cache_read_tokens,
+                )
 
                 return StructuredResponse(
                     result=result_dict,
@@ -1295,6 +1333,9 @@ class OpenAICompatibleProvider(LLMProvider):
                         system=system, max_tokens=max_tokens,
                         cache_control=cache_control,
                     )
+                if _is_rate_limit(exc):
+                    from core.llm.throttle import broadcast_rate_limit
+                    broadcast_rate_limit()
                 if not _is_transient_openai(exc) or attempt >= max_retries:
                     kind = "transient" if _is_transient_openai(exc) else "permanent"
                     # escape_nonprintable — exc is from the SDK and
@@ -1630,7 +1671,11 @@ class AnthropicProvider(LLMProvider):
         if supports_temperature(self.config.model_name):
             create_kwargs["temperature"] = kwargs.get("temperature", self.config.temperature)
         if system_prompt:
-            create_kwargs["system"] = system_prompt
+            create_kwargs["system"] = [{
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }]
 
         try:
             t_start = time.monotonic()
@@ -1657,15 +1702,26 @@ class AnthropicProvider(LLMProvider):
             input_tokens = 0
             output_tokens = 0
             thinking_tokens = 0
+            cache_read_tokens = 0
+            cache_write_tokens = 0
             if response.usage:
                 input_tokens = response.usage.input_tokens or 0
                 output_tokens = response.usage.output_tokens or 0
-                # Anthropic extended thinking (when available)
                 thinking_tokens = getattr(response.usage, 'thinking_tokens', 0) or 0
+                cache_read_tokens = getattr(response.usage, 'cache_read_input_tokens', 0) or 0
+                cache_write_tokens = getattr(response.usage, 'cache_creation_input_tokens', 0) or 0
             tokens_used = input_tokens + output_tokens + thinking_tokens
-            cost = self._calculate_cost_split(input_tokens, output_tokens, thinking_tokens)
+            cost = self._calculate_cost_split(
+                input_tokens, output_tokens, thinking_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+            )
 
-            self.track_usage(tokens_used, cost, input_tokens, output_tokens, duration)
+            self.track_usage(
+                tokens_used, cost, input_tokens, output_tokens, duration,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+            )
             logger.debug(f"[Anthropic] model={self.config.model_name}, tokens={tokens_used}, cost=${cost:.4f}, duration={duration:.2f}s")
 
             return LLMResponse(
@@ -1679,6 +1735,8 @@ class AnthropicProvider(LLMProvider):
                 output_tokens=output_tokens,
                 thinking_tokens=thinking_tokens,
                 duration=duration,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
                 resolved_model=extract_resolved_model(response),
             )
 
@@ -1719,7 +1777,11 @@ class AnthropicProvider(LLMProvider):
                 if supports_temperature(self.config.model_name):
                     create_kwargs["temperature"] = temperature
                 if system_prompt:
-                    create_kwargs["system"] = system_prompt
+                    create_kwargs["system"] = [{
+                        "type": "text",
+                        "text": system_prompt,
+                        "cache_control": {"type": "ephemeral"},
+                    }]
 
                 t_start = time.monotonic()
                 result, completion = self.instructor_client.messages.create_with_completion(
@@ -1733,13 +1795,25 @@ class AnthropicProvider(LLMProvider):
                 input_tokens = 0
                 output_tokens = 0
                 thinking_tokens = 0
+                cache_read_tokens = 0
+                cache_write_tokens = 0
                 if completion.usage:
                     input_tokens = completion.usage.input_tokens or 0
                     output_tokens = completion.usage.output_tokens or 0
                     thinking_tokens = getattr(completion.usage, 'thinking_tokens', 0) or 0
+                    cache_read_tokens = getattr(completion.usage, 'cache_read_input_tokens', 0) or 0
+                    cache_write_tokens = getattr(completion.usage, 'cache_creation_input_tokens', 0) or 0
                 tokens_used = input_tokens + output_tokens + thinking_tokens
-                cost = self._calculate_cost_split(input_tokens, output_tokens, thinking_tokens)
-                self.track_usage(tokens_used, cost, input_tokens, output_tokens, duration)
+                cost = self._calculate_cost_split(
+                    input_tokens, output_tokens, thinking_tokens,
+                    cache_read_tokens=cache_read_tokens,
+                    cache_write_tokens=cache_write_tokens,
+                )
+                self.track_usage(
+                    tokens_used, cost, input_tokens, output_tokens, duration,
+                    cache_read_tokens=cache_read_tokens,
+                    cache_write_tokens=cache_write_tokens,
+                )
 
                 return StructuredResponse(
                     result=result_dict,
@@ -1920,6 +1994,9 @@ class AnthropicProvider(LLMProvider):
                 resp = create_fn(**send_kwargs)
                 break
             except (APIConnectionError, APIStatusError, APIError) as exc:
+                if _is_rate_limit(exc):
+                    from core.llm.throttle import broadcast_rate_limit
+                    broadcast_rate_limit()
                 if not _is_transient_anthropic(exc) or attempt >= max_retries:
                     kind = "transient" if _is_transient_anthropic(exc) else "permanent"
                     # escape_nonprintable — see OpenAICompatibleProvider.turn
@@ -1991,6 +2068,8 @@ class AnthropicProvider(LLMProvider):
             input_tokens=turn_response.input_tokens,
             output_tokens=turn_response.output_tokens,
             duration=duration,
+            cache_read_tokens=turn_response.cache_read_tokens,
+            cache_write_tokens=turn_response.cache_write_tokens,
         )
         self._maybe_warn_silent_cache_failure(turn_response, cache_control)
         return turn_response
@@ -2097,6 +2176,17 @@ def _is_transient_anthropic(exc: BaseException) -> bool:
         status = getattr(exc, "status_code", None)
         return status == 429 or (status is not None and 500 <= status < 600)
     return False
+
+
+def _is_rate_limit(exc: BaseException) -> bool:
+    """``True`` when ``exc`` is specifically a 429 rate-limit error.
+
+    Provider-agnostic: checks ``status_code`` attribute regardless of
+    the SDK exception type.  Used to signal the adaptive throttle
+    (halve concurrency) — distinct from ``_is_transient_*`` which
+    also covers 5xx and connection errors.
+    """
+    return getattr(exc, "status_code", None) == 429
 
 
 def _message_to_anthropic_wire(m: Message) -> Dict[str, Any]:
