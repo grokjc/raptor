@@ -136,8 +136,15 @@ FAST_TIER_IGNORES = {
 
 def is_test_file(path: Path) -> bool:
     """Heuristic: a .py file is a test if its name starts with test_ or
-    ends with _test, or it lives under a tests/ directory."""
+    ends with _test, or it lives under a tests/ directory.
+
+    Files under ``fixtures/`` are excluded — they are test data (e.g.
+    Flask apps) that pytest must not collect as test modules.
+    """
     if not path.name.endswith(".py"):
+        return False
+    parts = path.parts
+    if "fixtures" in parts:
         return False
     name = path.stem
     if name.startswith("test_") or name.endswith("_test"):
