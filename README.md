@@ -294,10 +294,10 @@ CodeQL needs network access only during initial setup to download the CLI and qu
 
 ## Custom rules
 
-RAPTOR ships 169 custom static analysis rules, adversarially tested to eliminate false positives:
+RAPTOR ships 170 custom static analysis rules, adversarially tested to eliminate false positives:
 
 - **Semgrep (123 rules)** — taint-tracking and pattern rules for Python, Go, Java, and JS/TS. Covers SQLi, XSS, SSRF, SSTI, command injection, deserialisation, XXE, LDAP/NoSQL injection, path traversal, open redirect, log/header injection, eval injection, ReDoS, prototype pollution, JWT misconfiguration, weak crypto, insecure TLS, and hardcoded secrets.
-- **Coccinelle (38 rules)** — structural matching for C/C++. Memory safety (double free, use-after-free, free of non-base pointer), integer bugs (overflow, sign extension, double sizeof), resource leaks, kernel bugs (GFP_KERNEL/sleep under spinlock, missing bounds checks), buffer handling (strncpy without NUL, copy_user size mismatch), TOCTOU races, and more.
+- **Coccinelle (39 rules)** — structural matching for C/C++. Memory safety (double free, use-after-free, free of non-base pointer), integer bugs (overflow, sign extension, double sizeof), resource leaks, kernel bugs (GFP_KERNEL/sleep under spinlock, missing bounds checks), buffer handling (strncpy without NUL, copy_user size mismatch), format string injection, TOCTOU races, and more.
 - **CodeQL (8 queries)** — interprocedural taint tracking for C++ (format string injection, integer truncation, use-after-move, iterator invalidation) and Java (XXE, insecure deserialisation, log injection, Spring SSRF).
 
 Browse the rules directly: `engine/semgrep/rules/`, `engine/coccinelle/rules/`, `engine/codeql/queries/`. These complement the registry packs (`p/security-audit`, `p/owasp-top-ten`, `p/0xdea`, `p/trailofbits`) which provide ~950 additional rules — overlap is minimal.
@@ -441,19 +441,16 @@ Requires `GOOGLE_APPLICATION_CREDENTIALS` for BigQuery access. See `.claude/comm
 
 ## Expert personas
 
-Ten expert personas are available on demand. Load one when you want a different perspective on a finding or a specific technique:
+Seven expert personas are available on demand. Load one when you want a different perspective on a finding or a specific technique:
 
 ```
-Mark Dowd                       Binary exploitation and vulnerability research
-Charlie Miller / Halvar Flake   Low-level exploitation and reverse engineering
-Offensive Security Researcher   Exploitation feasibility assessment
-Security Researcher             General adversarial code review
-Patch Engineer                  Secure fix generation
-Penetration Tester              Realistic attack scenario assessment
-Fuzzing Strategist              Corpus design and triage
-Binary Exploitation Specialist  ROP, heap, and memory corruption
-CodeQL Dataflow Analyst         Query writing and path analysis
-CodeQL Finding Analyst          Triage and false positive identification
+Exploit Developer (Mark Dowd)                  Exploit PoC generation
+Crash Analyst (Charlie Miller / Halvar Flake)  Crash analysis and exploitability assessment
+Security Researcher                            General adversarial code review
+Patch Engineer                                 Secure fix generation
+Penetration Tester                             Realistic attack scenario assessment
+Fuzzing Strategist                             Corpus design and triage
+Binary Exploitation Specialist                 ROP, heap, and memory corruption
 ```
 
 Tell Claude which one to use, e.g. "Use the Binary Exploitation Specialist".
@@ -481,6 +478,8 @@ See `docs/README.md` for the full index. Key guides:
 | `docs/security.md` | RAPTOR's own security model |
 | `docs/threat-model.md` | Per-project threat model feature |
 | `docs/python-cli.md` | Python CLI reference for scripting and CI |
+| `docs/concepts.md` | Core concepts: two-layer model, finding lifecycle, choosing a command |
+| `docs/agentic.md` | Autonomous workflow: `/agentic` pipeline, enrichment flags, multi-model |
 | `docs/dependencies.md` | External tools, versions, and licences |
 | `tiers/personas/README.md` | Expert persona reference |
 
