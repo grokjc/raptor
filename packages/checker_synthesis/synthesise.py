@@ -174,7 +174,6 @@ def _run_semgrep(
         # SemgrepFinding has attribute access — file, line, etc.
         path = getattr(f, "file", "") or ""
         line = int(getattr(f, "line", 0) or 0)
-        message = getattr(f, "message", "") or ""
         # Normalise to repo-relative when possible.
         rel = path
         try:
@@ -183,8 +182,7 @@ def _run_semgrep(
                 rel = str(p.relative_to(target_resolved))
         except (ValueError, OSError):
             rel = path
-        matches.append(Match(file=rel, line=line,
-                             snippet=str(message)[:500]))
+        matches.append(Match(file=rel, line=line, snippet=""))
     errors: List[str] = list(result.errors or [])
     return matches, errors
 
@@ -203,7 +201,7 @@ def _run_coccinelle(
         try:
             rel = str(Path(path).relative_to(target.resolve())) \
                 if Path(path).is_absolute() else path
-        except ValueError:
+        except (ValueError, OSError):
             rel = path
         matches.append(Match(file=rel, line=int(line),
                              snippet=str(snippet)[:500]))
@@ -341,7 +339,7 @@ def _dual_control(
 def _is_seed_match(seed: SeedBug, m: Match) -> bool:
     """Identify a match that IS the seed bug (so we can drop it
     from the variant list)."""
-    if Path(m.file).name != Path(seed.file).name:
+    if m.file != seed.file:
         return False
     return seed.line_start <= m.line <= seed.line_end
 

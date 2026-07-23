@@ -410,9 +410,15 @@ def validate_dataflow_claims(
         "n_deep_validate_auto_enabled": 0,
     }
 
-    # Master kill-switch — bail before doing any work.
+    # Master kill-switches — bail before doing any work.
     try:
         from core.config import RaptorConfig
+        if not RaptorConfig.CODEQL_ENABLED:
+            logger.info(
+                "dataflow validation skipped: CODEQL_ENABLED is False",
+            )
+            metrics["skipped_reason"] = "codeql_disabled"
+            return metrics
         if not RaptorConfig.IRIS_TIER1_ENABLED:
             logger.info(
                 "dataflow validation skipped: IRIS_TIER1_ENABLED is False",

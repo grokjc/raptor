@@ -251,10 +251,14 @@ class VulnerabilityContext:
 
         # Function metadata from inventory (if available)
         self.metadata: Optional[Dict[str, Any]] = finding.get("metadata")
+        self.function_name: Optional[str] = None
 
         # Feasibility data from validation pipeline (if available)
         from packages.exploitability_validation.models import Feasibility
-        self.feasibility: Dict[str, Any] = Feasibility.from_dict(finding.get("feasibility")).to_dict()
+        self.feasibility: Dict[str, Any] = (
+            Feasibility.from_dict(finding.get("feasibility"))
+            .to_dict()
+        )
         self.attack_path_ref: Optional[str] = self.feasibility.get("attack_path_ref")
 
         # Will be populated by LLM analysis
@@ -344,7 +348,9 @@ class VulnerabilityContext:
             logger.error(f"Error reading file {file_path}: {e}")
             return False
 
-    def _read_code_at_location(self, file_uri: str, line: int, context_lines: int = 5) -> str:
+    def _read_code_at_location(
+        self, file_uri: str, line: int, context_lines: int = 5,
+    ) -> str:
         """
         Read code at a specific location with surrounding context.
 
@@ -463,7 +469,11 @@ class VulnerabilityContext:
                 if is_sanitizer:
                     self.sanitizers_found.append(step["label"])
 
-            logger.info(f"✓ Extracted dataflow: {len(self.dataflow_steps)} steps, {len(self.sanitizers_found)} sanitizers")
+            logger.info(
+                "✓ Extracted dataflow: %d steps, %d sanitizers",
+                len(self.dataflow_steps),
+                len(self.sanitizers_found),
+            )
             return True
 
         except Exception as e:
@@ -508,6 +518,9 @@ class VulnerabilityContext:
         if self.intent_match is not None:
             result["intent_match"] = dict(self.intent_match)
 
+        if self.function_name:
+            result["function_name"] = self.function_name
+
         # Add function metadata if available (from inventory checklist)
         if self.metadata:
             result["metadata"] = self.metadata
@@ -519,7 +532,8 @@ class VulnerabilityContext:
             result["surrounding_context"] = self.surrounding_context
 
         # Add feasibility data if present (always a dict, check for non-default)
-        if self.feasibility.get("status", "pending") != "pending" or self.feasibility.get("verdict"):
+        feas_status = self.feasibility.get("status", "pending")
+        if feas_status != "pending" or self.feasibility.get("verdict"):
             result["feasibility"] = self.feasibility
 
         # Add dataflow information if present
@@ -590,8 +604,17 @@ def convert_validated_to_agent_format(data: dict) -> List[Dict[str, Any]]:
             "startLine": f.line,
             "endLine": f.line,
             "snippet": f.proof.vulnerable_code,
-            "message": f.candidate_reasoning or f.message or f.rule_id or f"{f.vuln_type} in {f.function or 'unknown'}",
-            "level": "error" if f.final_status in EXPLOITABLE_FINAL_STATUSES else "warning",
+            "message": (
+                f.candidate_reasoning
+                or f.message
+                or f.rule_id
+                or f"{f.vuln_type} in {f.function or 'unknown'}"
+            ),
+            "level": (
+                "error"
+                if f.final_status in EXPLOITABLE_FINAL_STATUSES
+                else "warning"
+            ),
             "has_dataflow": bool(f.proof.flow),
             "feasibility": feasibility_d,
             "attack_path_ref": f.feasibility.attack_path_ref,
@@ -604,8 +627,10 @@ def convert_validated_to_agent_format(data: dict) -> List[Dict[str, Any]]:
 
 
 class AutonomousSecurityAgentV2:
-    def __init__(self, repo_path: Path, out_dir: Path, llm_config: Optional[LLMConfig] = None,
-                 prep_only: bool = False,
+    def __init__(
+        self, repo_path: Path, out_dir: Path,
+        llm_config: Optional[LLMConfig] = None,
+        prep_only: bool = False,
                  synthesise_checkers: bool = True,
                  refine_checkers: bool = True,
                  generate_exploits: bool = True,
@@ -690,12 +715,19 @@ class AutonomousSecurityAgentV2:
             logger.info("RAPTOR Autonomous Security Agent initialised")
             logger.info(f"Repository: {repo_path}")
             logger.info(f"Output: {out_dir}")
-            logger.info(f"LLM: {self.llm_config.primary_model.provider}/{self.llm_config.primary_model.model_name}")
+            pm = self.llm_config.primary_model
+            logger.info(f"LLM: {pm.provider}/{pm.model_name}")
 
             # Also print to console so user can see
-            print(f"\n🤖 Using LLM: {self.llm_config.primary_model.provider}/{self.llm_config.primary_model.model_name}")
-            if self.llm_config.primary_model.cost_per_1k_tokens > 0:
-                print(f"💰 Cost: ${self.llm_config.primary_model.cost_per_1k_tokens:.4f} per 1K tokens")
+            print(
+                f"\n🤖 Using LLM: {pm.provider}"
+                f"/{pm.model_name}"
+            )
+            if pm.cost_per_1k_tokens > 0:
+                print(
+                    f"💰 Cost: ${pm.cost_per_1k_tokens:.4f}"
+                    " per 1K tokens"
+                )
             else:
                 print("💰 Cost: FREE (self-hosted model)")
 
@@ -703,9 +735,19 @@ class AutonomousSecurityAgentV2:
             if "ollama" in self.llm_config.primary_model.provider.lower():
                 print()
                 print("IMPORTANT: You are using an Ollama model.")
-                print("   • Vulnerability analysis and patching: Works well with Ollama models")
-                print("   • Exploit generation: Requires frontier models (Anthropic Claude / OpenAI GPT-4)")
-                print("   • Ollama models may generate invalid/non-compilable exploit code")
+                print(
+                    "   • Vulnerability analysis and "
+                    "patching: Works well with Ollama models"
+                )
+                print(
+                    "   • Exploit generation: Requires "
+                    "frontier models (Anthropic Claude "
+                    "/ OpenAI GPT-4)"
+                )
+                print(
+                    "   • Ollama models may generate "
+                    "invalid/non-compilable exploit code"
+                )
                 print()
                 print("   For production-quality exploits, use:")
                 print("     export ANTHROPIC_API_KEY=your_key  (recommended)")
@@ -721,10 +763,40 @@ class AutonomousSecurityAgentV2:
             logger.info(f"Output: {out_dir}")
 
             if availability.claude_code:
-                print("\n🤖 No external LLM configured — Claude Code will handle analysis")
+                print(
+                    "\n🤖 No external LLM configured — "
+                    "Claude Code will handle analysis"
+                )
             else:
-                print("\n⚠️  No LLM available — producing structured findings for manual review", file=sys.stderr)
+                print(
+                    "\n⚠️  No LLM available — producing "
+                    "structured findings for manual review",
+                    file=sys.stderr,
+                )
             print()
+
+    def _prompt_budget(self) -> int:
+        try:
+            from core.llm.prompt_budget import (
+                context_budget_for_model, estimate_tokens,
+            )
+            from packages.llm_analysis.prompts import (
+                ANALYSIS_SYSTEM_PROMPT, ANALYSIS_TASK_INSTRUCTIONS,
+            )
+            if self.llm_config and self.llm_config.primary_model:
+                model = self.llm_config.primary_model.model_name
+            else:
+                model = ""
+            sys_text = (
+                ANALYSIS_SYSTEM_PROMPT + "\n\n"
+                + ANALYSIS_TASK_INSTRUCTIONS
+            )
+            sys_tokens = estimate_tokens(sys_text)
+            return context_budget_for_model(
+                model, system_prompt_tokens=sys_tokens,
+            )
+        except Exception:
+            return 0
 
     def _load_attack_path(self, ref: str) -> Optional[Dict[str, Any]]:
         """Load attack path from a ref like 'attack-paths.json#PATH-001'.
@@ -763,9 +835,9 @@ class AutonomousSecurityAgentV2:
                 return None
             # Search in validation directory — check multiple likely locations
             candidates = [
-                self.out_dir.parent / "validation" / file_name,    # Normal pipeline layout
-                self.out_dir / file_name,                           # Same directory as findings
-                self.out_dir.parent / file_name,                    # One level up
+                self.out_dir.parent / "validation" / file_name,
+                self.out_dir / file_name,
+                self.out_dir.parent / file_name,
             ]
             for search_path in candidates:
                 paths = load_json(search_path)
@@ -780,7 +852,8 @@ class AutonomousSecurityAgentV2:
         """
         Deep validation of dataflow path using LLM to assess true exploitability.
 
-        This is the CRITICAL step that separates real vulnerabilities from false positives.
+        This is the CRITICAL step that separates real
+        vulnerabilities from false positives.
 
         Args:
             vuln: VulnerabilityContext with extracted dataflow
@@ -842,11 +915,21 @@ class AutonomousSecurityAgentV2:
             )
             validation = validated.data
             if validated.quality < 0.5:
-                logger.warning(f"Low-quality dataflow validation (q={validated.quality:.2f}), incomplete: {validated.incomplete}")
+                logger.warning(
+                    "Low-quality dataflow validation "
+                    "(q=%.2f), incomplete: %s",
+                    validated.quality, validated.incomplete,
+                )
 
             logger.info("✓ Dataflow validation complete:")
-            logger.info(f"  Source attacker-controlled: {validation.get('source_attacker_controlled')}")
-            logger.info(f"  Sanitizers effective: {validation.get('sanitizers_effective')}")
+            logger.info(
+                "  Source attacker-controlled: %s",
+                validation.get("source_attacker_controlled"),
+            )
+            logger.info(
+                "  Sanitizers effective: %s",
+                validation.get("sanitizers_effective"),
+            )
             logger.info(f"  Path reachable: {validation.get('path_reachable')}")
             logger.info(f"  Is exploitable: {validation.get('is_exploitable')}")
             # `.get(key, default)` only fires the default for MISSING keys;
@@ -863,16 +946,27 @@ class AutonomousSecurityAgentV2:
                 for san_detail in validation.get('sanitizer_details', []):
                     logger.info(f"    - {san_detail.get('name')}")
                     logger.info(f"      Purpose: {san_detail.get('purpose')}")
-                    logger.info(f"      Bypassable: {san_detail.get('bypass_possible')}")
+                    logger.info(
+                        "      Bypassable: %s",
+                        san_detail.get("bypass_possible"),
+                    )
                     if san_detail.get('bypass_method'):
-                        logger.info(f"      Bypass: {(san_detail.get('bypass_method') or '')[:100]}")
+                        bm = san_detail.get(
+                            "bypass_method"
+                        )[:100]
+                        logger.info(
+                            "      Bypass: %s", bm,
+                        )
 
             if validation.get('attack_payload_concept'):
                 logger.info("\n  Attack Payload Concept:")
-                logger.info(f"    {(validation.get('attack_payload_concept') or '')[:200]}")
+                logger.info(f"    {validation.get('attack_payload_concept')[:200]}")
 
             # Save validation details
-            validation_file = self.out_dir / "validation" / f"{vuln.finding_id}_validation.json"
+            val_name = f"{vuln.finding_id}_validation.json"
+            validation_file = (
+                self.out_dir / "validation" / val_name
+            )
             save_json(validation_file, validation)
 
             return validation
@@ -885,7 +979,10 @@ class AutonomousSecurityAgentV2:
         is_prep = isinstance(self.llm, ClaudeCodeProvider)
 
         if is_prep:
-            logger.debug(f"Prepping: {vuln.rule_id} at {vuln.file_path}:{vuln.start_line}")
+            logger.debug(
+                "Prepping: %s at %s:%s",
+                vuln.rule_id, vuln.file_path, vuln.start_line,
+            )
         else:
             logger.info("=" * 70)
             logger.info(f"Analysing vulnerability: {vuln.rule_id}")
@@ -893,7 +990,10 @@ class AutonomousSecurityAgentV2:
             logger.info(f"  Severity: {vuln.level}")
             logger.info(f"  Has dataflow: {'Yes' if vuln.has_dataflow else 'No'}")
             msg = vuln.message or ""
-            logger.info(f"  Message: {msg[:100]}..." if len(msg) > 100 else f"  Message: {msg}")
+            if len(msg) > 100:
+                logger.info(f"  Message: {msg[:100]}...")
+            else:
+                logger.info(f"  Message: {msg}")
 
         # Read the actual vulnerable code
         if not vuln.read_vulnerable_code():
@@ -907,9 +1007,18 @@ class AutonomousSecurityAgentV2:
         # Extract dataflow path if available
         if vuln.has_dataflow:
             if vuln.extract_dataflow():
-                logger.info(f"✓ Dataflow path: {vuln.dataflow_path.get('total_steps', 0)} total steps")
+                total = vuln.dataflow_path.get(
+                    "total_steps", 0,
+                )
+                logger.info(
+                    "✓ Dataflow path: %d total steps",
+                    total,
+                )
                 if vuln.sanitizers_found:
-                    logger.info(f"  ⚠️  Sanitizers detected: {', '.join(vuln.sanitizers_found)}")
+                    slist = ", ".join(vuln.sanitizers_found)
+                    logger.info(
+                        f"  ⚠️  Sanitizers detected: {slist}"
+                    )
             else:
                 logger.warning("⚠️  Failed to extract dataflow path")
 
@@ -983,6 +1092,7 @@ class AutonomousSecurityAgentV2:
                 self._get_verified_outcomes()
                 if self.use_verified_exemplars else ()
             ),
+            budget_tokens=self._prompt_budget(),
         )
         prompt = next(m.content for m in bundle.messages if m.role == "user")
         system_prompt = next(m.content for m in bundle.messages if m.role == "system")
@@ -1015,37 +1125,74 @@ class AutonomousSecurityAgentV2:
             )
             analysis = validated.data
             if validated.quality < 0.5:
-                logger.warning(f"Low-quality LLM response (q={validated.quality:.2f}), incomplete: {validated.incomplete}")
+                logger.warning(
+                    "Low-quality LLM response "
+                    "(q=%.2f), incomplete: %s",
+                    validated.quality, validated.incomplete,
+                )
 
-            vuln.exploitable = analysis.get("is_exploitable", False)
-            vuln.exploitability_score = analysis.get("exploitability_score", 0.0)
+            vuln.exploitable = analysis.get("is_exploitable") or False
+            vuln.exploitability_score = analysis.get("exploitability_score") or 0.0
             vuln.analysis = analysis
 
             logger.info("✓ LLM analysis complete:")
             logger.info(f"  True Positive: {analysis.get('is_true_positive', False)}")
             logger.info(f"  Exploitable: {vuln.exploitable}")
             logger.info(f"  Exploitability Score: {vuln.exploitability_score:.2f}")
-            logger.info(f"  Severity Assessment: {analysis.get('severity_assessment', 'unknown')}")
+            logger.info(
+                "  Severity Assessment: %s",
+                analysis.get("severity_assessment", "unknown"),
+            )
             # Compute CVSS score from vector if provided
             from packages.cvss import score_finding
             score_finding(analysis)
             if analysis.get("cvss_score_estimate") is not None:
-                logger.info(f"  CVSS: {analysis['cvss_score_estimate']} ({analysis.get('severity_assessment', '?')}) from {analysis.get('cvss_vector')}")
+                cvss = analysis["cvss_score_estimate"]
+                sev = analysis.get("severity_assessment", "?")
+                vec = analysis.get("cvss_vector")
+                logger.info(
+                    f"  CVSS: {cvss} ({sev}) from {vec}"
+                )
             else:
-                logger.info(f"  CVSS Estimate: {analysis.get('cvss_score_estimate', 'N/A')}")
+                logger.info(
+                    "  CVSS Estimate: %s",
+                    analysis.get("cvss_score_estimate", "N/A"),
+                )
 
             # Log dataflow-specific analysis
             if vuln.has_dataflow and 'source_attacker_controlled' in analysis:
                 logger.info("\n  Dataflow Analysis:")
-                logger.info(f"    Source attacker-controlled: {analysis.get('source_attacker_controlled', 'N/A')}")
-                logger.info(f"    Sanitizers effective: {analysis.get('sanitizers_effective', 'N/A')}")
+                logger.info(
+                    "    Source attacker-controlled: %s",
+                    analysis.get(
+                        "source_attacker_controlled", "N/A",
+                    ),
+                )
+                logger.info(
+                    "    Sanitizers effective: %s",
+                    analysis.get("sanitizers_effective", "N/A"),
+                )
                 if analysis.get('sanitizer_bypass_technique'):
-                    logger.info(f"    Bypass technique: {(analysis.get('sanitizer_bypass_technique') or '')[:100]}...")
-                logger.info(f"    Dataflow exploitable: {analysis.get('dataflow_exploitable', 'N/A')}")
+                    bypass = (
+                        analysis.get(
+                            "sanitizer_bypass_technique"
+                        ) or ""
+                    )[:100]
+                    logger.info(
+                        f"    Bypass technique: {bypass}..."
+                    )
+                logger.info(
+                    "    Dataflow exploitable: %s",
+                    analysis.get("dataflow_exploitable", "N/A"),
+                )
 
-            logger.info(f"\n  Reasoning: {(analysis.get('reasoning') or '')[:150]}...")
+            reasoning = (analysis.get("reasoning") or "")[:150]
+            logger.info(f"\n  Reasoning: {reasoning}...")
             if analysis.get('attack_scenario'):
-                logger.info(f"  Attack Scenario: {(analysis.get('attack_scenario') or '')[:150]}...")
+                scenario = analysis.get("attack_scenario")[:150]
+                logger.info(
+                    f"  Attack Scenario: {scenario}..."
+                )
 
             # Deep dataflow validation for high-confidence findings
             if vuln.has_dataflow and vuln.exploitable:
@@ -1092,13 +1239,31 @@ class AutonomousSecurityAgentV2:
                     if validation:
                         # Update exploitability based on validation
                         if validation.get('false_positive'):
-                            logger.info("⚠️  Validation marked as False Positive:")
-                            logger.info(f"    Reason: {validation.get('false_positive_reason')}")
+                            logger.info(
+                                "⚠️  Validation marked as "
+                                "FALSE POSITIVE:"
+                            )
+                            logger.info(
+                                "    Reason: %s",
+                                validation.get(
+                                    "false_positive_reason"
+                                ),
+                            )
                             vuln.exploitable = False
                             vuln.exploitability_score = 0.0
                         elif not validation.get('is_exploitable'):
-                            logger.info("⚠️  Validation determined Not Exploitable:")
-                            logger.info(f"    Reason: {(validation.get('exploitability_reasoning') or '')[:150]}")
+                            logger.info(
+                                "⚠️  Validation determined "
+                                "NOT EXPLOITABLE:"
+                            )
+                            reason = (
+                                validation.get(
+                                    "exploitability_reasoning"
+                                ) or ""
+                            )[:150]
+                            logger.info(
+                                "    Reason: %s", reason,
+                            )
                             vuln.exploitable = False
                             # Same null-vs-missing distinction as the
                             # log site above — explicit None from the
@@ -1109,7 +1274,7 @@ class AutonomousSecurityAgentV2:
                             vuln.exploitability_score = _conf * 0.5
                         else:
                             # Validation confirms exploitability
-                            logger.info("✓ Validation confirms Exploitable")
+                            logger.info("✓ Validation confirms EXPLOITABLE")
                             # Use validation confidence to refine score —
                             # fall back to existing score if missing OR
                             # explicit null (max(float, None) → TypeError).
@@ -1137,7 +1302,12 @@ class AutonomousSecurityAgentV2:
         except Exception as e:
             logger.error(f"✗ LLM analysis failed: {e}")
             if _is_auth_error(e):
-                print("⚠️  LLM authentication failed — check your API key. Falling back to heuristic analysis.", file=sys.stderr)
+                print(
+                    "⚠️  LLM authentication failed — "
+                    "check your API key. Falling back to "
+                    "heuristic analysis.",
+                    file=sys.stderr,
+                )
             else:
                 logger.warning("  Using fallback heuristic analysis")
             # Fallback to marking as potentially exploitable
@@ -1362,9 +1532,12 @@ class AutonomousSecurityAgentV2:
                 vuln.exploit_code = exploit_code
 
                 # Save exploit
-                exploit_file = self.out_dir / "exploits" / f"{vuln.finding_id}_exploit.cpp"
+                exploit_name = f"{vuln.finding_id}_exploit.cpp"
+                exploit_file = (
+                    self.out_dir / "exploits" / exploit_name
+                )
                 exploit_file.parent.mkdir(exist_ok=True, parents=True)
-                exploit_file.write_text(exploit_code, encoding="utf-8")
+                exploit_file.write_text(exploit_code)
 
                 logger.info(f"   ✓ Exploit generated: {len(exploit_code)} bytes")
                 logger.info(f"   ✓ Saved to: {exploit_file.name}")
@@ -1412,7 +1585,7 @@ class AutonomousSecurityAgentV2:
         except Exception as e:
             logger.error(f"   ✗ Exploit generation failed: {e}")
             if _is_auth_error(e):
-                print("⚠️  LLM authentication failed — check your API key.", file=sys.stderr)
+                print("⚠️  LLM authentication failed — check your API key.")
             return False
 
     # File extensions that map to languages the gcc-based validator
@@ -1629,7 +1802,7 @@ class AutonomousSecurityAgentV2:
 
         logger.info("   ✓ Reading full file for context...")
 
-        with open(file_path, encoding="utf-8", errors="replace") as f:
+        with open(file_path) as f:
             full_file_content = f.read()
 
         from packages.llm_analysis.prompts.patch import build_patch_prompt_bundle
@@ -1685,7 +1858,8 @@ class AutonomousSecurityAgentV2:
             patch_file.parent.mkdir(exist_ok=True, parents=True)
 
             from core.reporting.formatting import display_rule_id
-            patch_content_formatted = f"""# Security Patch for {display_rule_id(vuln.rule_id)}
+            rule_display = display_rule_id(vuln.rule_id)
+            patch_content_formatted = f"""# Security Patch for {rule_display}
 
 **File:** {vuln.file_path}
 **Lines:** {vuln.start_line}-{vuln.end_line}
@@ -1703,7 +1877,7 @@ class AutonomousSecurityAgentV2:
 *Review and test before applying to production*
 """
 
-            patch_file.write_text(patch_content_formatted, encoding="utf-8")
+            patch_file.write_text(patch_content_formatted)
             vuln.patch_code = patch_content
 
             logger.info(f"   ✓ Patch generated: {len(patch_content)} bytes")
@@ -1713,7 +1887,7 @@ class AutonomousSecurityAgentV2:
         except Exception as e:
             logger.error(f"   ✗ Patch generation failed: {e}")
             if _is_auth_error(e):
-                print("⚠️  LLM authentication failed — check your API key.", file=sys.stderr)
+                print("⚠️  LLM authentication failed — check your API key.")
             return False
 
     # Match a markdown fenced code block. Captures the optional
@@ -1773,8 +1947,12 @@ class AutonomousSecurityAgentV2:
 
         converted = convert_validated_to_agent_format(data)
 
-        logger.info(f"Loaded {len(converted)} findings from {Path(findings_path).name} "
-                    f"(skipped {len(data.get('findings') or []) - len(converted)} ruled out/unlikely)")
+        skipped = len(data.get("findings", [])) - len(converted)
+        logger.info(
+            f"Loaded {len(converted)} findings from "
+            f"{Path(findings_path).name} "
+            f"(skipped {skipped} ruled out/unlikely)"
+        )
         return converted
 
     def _emit_finding_annotation(
@@ -1813,11 +1991,15 @@ class AutonomousSecurityAgentV2:
         ``process_findings`` stays brief."""
         return resolve_prefer_globs(operator_globs, self.repo_path)
 
-    def process_findings(self, sarif_paths: List[str] = None, findings_path: str = None,
-                         max_findings: int = 10, checklist: Dict[str, Any] = None,
-                         emit_annotations: bool = True,
-                         prefer_globs: Optional[List[str]] = None,
-                         exclude_globs: Optional[List[str]] = None) -> Dict[str, Any]:
+    def process_findings(
+        self, sarif_paths: List[str] = None,
+        findings_path: str = None,
+        max_findings: int = 10,
+        checklist: Dict[str, Any] = None,
+        emit_annotations: bool = True,
+        prefer_globs: Optional[List[str]] = None,
+        exclude_globs: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Process findings with full LLM-powered autonomous workflow.
 
         ``emit_annotations``: when False, skip the per-finding
@@ -1857,7 +2039,10 @@ class AutonomousSecurityAgentV2:
             all_findings = []
             for sarif_path in (sarif_paths or []):
                 findings = parse_sarif_findings(Path(sarif_path))
-                logger.info(f"Loaded {len(findings)} findings from {Path(sarif_path).name}")
+                logger.info(
+                    "Loaded %d findings from %s",
+                    len(findings), Path(sarif_path).name,
+                )
                 all_findings.extend(findings)
 
             unique_findings = deduplicate_findings(all_findings)
@@ -1880,7 +2065,10 @@ class AutonomousSecurityAgentV2:
 
         # Prioritize findings with dataflow paths (for better validation coverage)
         findings_with_dataflow = [f for f in unique_findings if f.get('has_dataflow')]
-        findings_without_dataflow = [f for f in unique_findings if not f.get('has_dataflow')]
+        findings_without_dataflow = [
+            f for f in unique_findings
+            if not f.get('has_dataflow')
+        ]
 
         # Put dataflow findings first, then others
         prioritized_findings = findings_with_dataflow + findings_without_dataflow
@@ -1920,12 +2108,19 @@ class AutonomousSecurityAgentV2:
             prioritized_findings = prioritized_findings[:max_findings]
 
         if is_prep_only:
-            logger.debug(f"Dedup: {len(unique_findings)} unique, {len(findings_with_dataflow)} with dataflow")
+            logger.debug(
+                "Dedup: %d unique, %d with dataflow",
+                len(unique_findings),
+                len(findings_with_dataflow),
+            )
         else:
             logger.info(f"After deduplication: {len(unique_findings)} unique findings")
             logger.info(f"  With dataflow: {len(findings_with_dataflow)}")
             logger.info(f"  Without dataflow: {len(findings_without_dataflow)}")
-            logger.info(f"Processing top {max_findings} findings (dataflow prioritized)")
+            logger.info(
+                "Processing top %d findings "
+                "(dataflow prioritized)", max_findings,
+            )
             logger.info("=" * 70)
 
         unique_findings = prioritized_findings
@@ -1995,14 +2190,18 @@ class AutonomousSecurityAgentV2:
         # module_aborts / lexical_dead). Counted separately so the operator
         # can see the savings split across the two short-circuit paths.
         reachability_skipped_llm_calls = 0
-        idx = 0  # Initialize idx to prevent UnboundLocalError when unique_findings is empty
+        idx = 0  # prevent UnboundLocalError when empty
 
         is_prep = isinstance(self.llm, ClaudeCodeProvider)
 
-        with HackerProgress(total=len(unique_findings), operation="Analyzing vulnerabilities",
-                            disabled=is_prep) as progress:
+        with HackerProgress(
+            total=len(unique_findings),
+            operation="Analyzing vulnerabilities",
+            disabled=is_prep,
+        ) as progress:
             for idx, finding in enumerate(unique_findings, 1):
-                progress.update(current=idx, message=f"{finding.get('rule_id', 'unknown')}")
+                rule = finding.get("rule_id", "unknown")
+                progress.update(current=idx, message=rule)
 
                 if is_prep and idx % 10 == 0:
                     print(f"  Preparing... {idx}/{len(unique_findings)}", flush=True)
@@ -2021,7 +2220,11 @@ class AutonomousSecurityAgentV2:
                 existing_meta = finding.get("metadata") or {}
                 if checklist and not existing_meta.get("name"):
                     fpath = finding.get("file_path") or finding.get("file") or ""
-                    fline = finding.get("start_line") if finding.get("start_line") is not None else finding.get("startLine", 0)
+                    sl = finding.get("start_line")
+                    fline = (
+                        sl if sl is not None
+                        else finding.get("startLine", 0)
+                    )
                     func = _lookup_function(
                         checklist, fpath, fline,
                         repo_root=str(self.repo_path),
