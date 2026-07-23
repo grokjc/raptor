@@ -300,12 +300,12 @@ The `/annotate` command attaches free-form prose to individual functions, stored
 
 ## PROGRESSIVE LOADING
 
-**When scan completes:** Load `tiers/analysis-guidance.md` (adversarial thinking)
+**When scan completes:** Load `tiers/analysis-guidance.md` (exploit feasibility triage)
 **When validating exploitability:** Load `.claude/skills/exploitability-validation/SKILL.md` (gates, methodology)
 **When validation errors occur:** Load `tiers/validation-recovery.md` (stage-specific recovery)
 **When developing exploits:** Load `tiers/exploit-guidance.md` (constraints, techniques)
 **When errors occur:** Load `tiers/recovery.md` (recovery protocol)
-**When requested:** Load `tiers/personas/[name].md` (expert personas)
+**When requested:** Load `tiers/personas/[name].md` (expert personas: security_researcher, exploit_developer, crash_analyst, binary_exploitation_specialist, patch_engineer, penetration_tester, fuzzing_strategist)
 **When running /understand:** Load `.claude/skills/code-understanding/SKILL.md` (gates, config) plus the relevant mode file: `map.md`, `trace.md`, `hunt.md`, or `teach.md`
 
 ---
