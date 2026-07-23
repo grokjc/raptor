@@ -31,10 +31,6 @@ _VALID_KEYS = frozenset({
     "codeql_ram_mb",
     "codeql_threads",
     "codeql_max_disk_cache_mb",
-    "joern_enabled",
-    "joern_heap_mb",
-    "joern_cpg_timeout_s",
-    "joern_query_timeout_s",
     "max_semgrep_workers",
     "max_codeql_workers",
     "max_fuzz_parallel",
@@ -52,7 +48,7 @@ _PASSTHROUGH_KEYS = frozenset({
     "throttle_cooldown_s",
 })
 
-_BOOLEAN_KEYS = frozenset({"codeql_enabled", "joern_enabled"})
+_BOOLEAN_KEYS = frozenset({"codeql_enabled"})
 
 _DEFAULTS = {
     "codeql_enabled": True,
@@ -62,10 +58,6 @@ _DEFAULTS = {
     # explicit MB cap when running unattended on bounded disk; codeql's
     # DB build cache otherwise grows without limit.
     "codeql_max_disk_cache_mb": 0,
-    "joern_enabled": True,
-    "joern_heap_mb": "auto",
-    "joern_cpg_timeout_s": 300,
-    "joern_query_timeout_s": 300,
     "max_semgrep_workers": 4,
     "max_codeql_workers": 2,
     "max_fuzz_parallel": 4,
@@ -116,12 +108,6 @@ def _detect_codeql_workers() -> int:
 def _detect_fuzz_parallel() -> int:
     """Resolve a conservative AFL++ parallel-instance ceiling."""
     return _detect_half_cpu_parallelism()
-
-
-def _detect_joern_heap_mb() -> int:
-    """25% of system RAM, clamped to [1024, 4096] MB."""
-    total_mb = _detect_total_ram_mb()
-    return max(1024, min(total_mb // 4, 4096))
 
 
 def _detect_inventory_workers() -> int:
@@ -203,7 +189,6 @@ def _detect_half_cpu_parallelism(max_workers: int | None = None) -> int:
 _AUTO_RESOLVERS = {
     "codeql_ram_mb": _detect_ram_mb,
     "codeql_threads": _detect_threads,
-    "joern_heap_mb": _detect_joern_heap_mb,
     "max_semgrep_workers": _detect_semgrep_workers,
     "max_codeql_workers": _detect_codeql_workers,
     "max_fuzz_parallel": _detect_fuzz_parallel,
@@ -225,10 +210,6 @@ class Tuning:
     codeql_ram_mb: int
     codeql_threads: int
     codeql_max_disk_cache_mb: int
-    joern_enabled: bool
-    joern_heap_mb: int
-    joern_cpg_timeout_s: int
-    joern_query_timeout_s: int
     max_semgrep_workers: int
     max_codeql_workers: int
     max_fuzz_parallel: int
@@ -336,10 +317,6 @@ def _create_default_file(path: Path) -> None:
             "codeql_ram_mb": "MB of RAM for CodeQL (-M)",
             "codeql_threads": "CPUs for CodeQL (-j; 0 = all available)",
             "codeql_max_disk_cache_mb": "MB cap on codeql DB build cache (--max-disk-cache; 0 = codeql's unbounded default)",
-            "joern_enabled": "set false to disable Joern CPG analysis",
-            "joern_heap_mb": "MB of heap for Joern JVM (auto = 25% of RAM, clamped)",
-            "joern_cpg_timeout_s": "seconds before CPG build is killed",
-            "joern_query_timeout_s": "seconds before a single Joern query is killed",
             "max_semgrep_workers": "parallel Semgrep scans (auto = half available CPUs)",
             "max_codeql_workers": "parallel CodeQL DB builds (auto = half available CPUs, capped)",
             "max_fuzz_parallel": "ceiling for AFL++ parallel instances (auto = half available CPUs)",
