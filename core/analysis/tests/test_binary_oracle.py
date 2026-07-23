@@ -109,6 +109,7 @@ def test_classify_carries_build_id_and_path(built_demo: Path) -> None:
     assert w.binary_path == str(built_demo)
 
 
+@pytest.mark.slow
 def test_unknown_source_name_is_absent(built_demo: Path) -> None:
     """A name not present in the binary at all classifies as ``absent`` —
     the DCE end of the spectrum, no special-case needed for missing names."""
@@ -210,6 +211,7 @@ def test_enrich_skips_non_native_items(built_demo: Path) -> None:
     assert "binary_oracle" not in py_item.get("metadata", {})
 
 
+@pytest.mark.slow
 def test_enrich_writes_inventory_summary(built_demo: Path) -> None:
     """Top-level summary with ``earns_suppression: True`` — earned by the
     Inc 3 precision corpus (841/841 absent verdicts correct across 5
@@ -480,6 +482,7 @@ def test_reach_witness_does_not_fire_sound_witness_on_symbol_only(
     assert binary_oracle_absent(inv_mixed, "x.c", "foo") is False
 
 
+@pytest.mark.slow
 def test_classifier_resolves_symlinked_binary(tmp_path: Path,
                                                 built_demo: Path) -> None:
     """A symlink to the binary should classify the same as the binary
@@ -830,6 +833,7 @@ def _planted_unrelated_binary(tmp_path_factory):
     return binary
 
 
+@pytest.mark.slow
 def test_enrich_drops_unrelated_binary_below_source_coverage_floor(
     _planted_unrelated_binary,
 ) -> None:
