@@ -2,29 +2,31 @@
 
 When ``analyze_vulnerability`` confirms a finding as exploitable, this
 module turns the bug into a Semgrep / Coccinelle rule via
-``packages.checker_synthesis``, runs it across the codebase, and emits
-``status=suspicious`` annotations for each variant match. One bug ⇒
-N variant annotations.
+``packages.checker_synthesis``, runs it across the codebase, and records
+variant matches in ``checker-matches.jsonl``. One bug => N variant
+matches.
 
 Per the audit design doc (Mode 2): every confirmed hypothesis
 potentially yields a reusable checker. The variants surfaced here are
-candidate findings — operator triages them via ``/annotate`` review,
-the next ``/agentic`` run can re-analyse them with full context, and
-the synthesised rule itself is saved on disk for future ``/scan`` runs
-(KNighter's permanent-rule pattern).
+candidate findings — the next ``/agentic`` run can analyse them with
+full context, and the synthesised rule itself is saved on disk for
+future ``/scan`` runs (KNighter's permanent-rule pattern).
 
 Best-effort: any exception is logged at DEBUG and swallowed so a
 synthesis failure cannot break the analysis loop. The caller's
-counter is bumped only when an annotation actually lands.
+counter is bumped only when a match is actually recorded.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
+
+CHECKER_MATCHES_FILE = "checker-matches.jsonl"
 
 
 def _llm_callable_from_client(llm_client) -> Optional[Any]:
@@ -75,8 +77,6 @@ def _seed_from_vuln(vuln, repo_root: Optional[Path] = None) -> Optional[Any]:
         except ValueError:
             return None
 
-    # Function name: prefer inventory-resolved metadata, fall back
-    # to whatever the upstream finding adapter populated.
     meta = getattr(vuln, "metadata", None) or {}
     function_name = (
         meta.get("name")
@@ -111,8 +111,7 @@ def _resolve_match_function(
     match, checklist: Optional[Dict[str, Any]], repo_root: Path,
 ) -> Optional[str]:
     """Look up the function name covering ``match.file:match.line``.
-    Returns None when not resolvable — the variant annotation needs
-    a function name to land in the right .md section."""
+    Returns None when not resolvable."""
     if not checklist:
         return None
     if not match.file or not match.line:
@@ -130,38 +129,7 @@ def _resolve_match_function(
     return func.get("name") or None
 
 
-def _build_variant_body(seed, rule, match) -> str:
-    """Compose the prose body for a variant annotation."""
-    parts = [
-        f"Candidate variant of bug pattern from "
-        f"{seed.file}:{seed.line_start}-{seed.line_end} "
-        f"({seed.function}).",
-    ]
-    if rule.rationale:
-        parts.append(f"Pattern rationale: {rule.rationale.strip()}")
-    if seed.cwe:
-        parts.append(f"CWE: {seed.cwe}")
-    parts.append(
-        f"Surfaced by {rule.engine} rule ``{rule.rule_id}``. "
-        f"Triage with ``/annotate show`` or re-run ``/agentic`` to "
-        f"confirm or rule out."
-    )
-    if match.snippet:
-        parts.append(f"Match snippet:\n```\n{match.snippet.rstrip()}\n```")
-    return "\n\n".join(parts)
-
-
-def _sanitise_meta(value) -> str:
-    """Coerce metadata values to a safe single-line string. Mirrors
-    the sanitiser in ``annotation_emit`` — strips newlines / nulls /
-    HTML-comment delimiters that would corrupt the on-disk format."""
-    s = str(value)
-    s = s.replace("\n", " ").replace("\r", " ").replace("\x00", "")
-    s = s.replace("-->", "->").replace("<!--", "<!-")
-    return s.strip()
-
-
-def emit_variant_annotations_for_finding(
+def emit_variant_matches_for_finding(
     vuln,
     *,
     out_dir: Path,
@@ -176,25 +144,22 @@ def emit_variant_annotations_for_finding(
     max_acceptable_fp_rate: float = 0.2,
 ) -> int:
     """For a confirmed exploitable finding, synthesise a checker
-    rule, run it across ``repo_root``, and emit ``suspicious``
-    annotations for every variant match.
+    rule, run it across ``repo_root``, and record variant matches
+    in ``checker-matches.jsonl``.
 
     When ``refine=True`` (default), runs the iterative FP-elimination
     loop: each iteration feeds false positives back as negative
     examples until the FP rate drops below ``max_acceptable_fp_rate``
     or ``max_refine_iterations`` is exhausted.
 
-    Returns the count of annotations actually written. Skipped
-    silently when:
+    Returns the count of matches actually written. Skipped silently
+    when:
 
       * Seed couldn't be built (missing file/line/function info)
       * LLM client doesn't support ``generate_structured``
       * Synthesis didn't produce a rule (positive control failed)
-      * No checklist (can't resolve match function names)
 
     Best-effort throughout — any exception is logged and swallowed.
-    The caller's analysis loop must never crash because variant
-    hunting failed.
     """
     try:
         seed = _seed_from_vuln(vuln, repo_root=repo_root)
@@ -264,7 +229,7 @@ def emit_variant_annotations_for_finding(
     if not result.matches:
         return 0
 
-    return _emit_variants(
+    return _record_matches(
         seed=seed,
         result=result,
         out_dir=out_dir,
@@ -273,7 +238,7 @@ def emit_variant_annotations_for_finding(
     )
 
 
-def _emit_variants(
+def _record_matches(
     *,
     seed,
     result,
@@ -281,20 +246,18 @@ def _emit_variants(
     checklist: Optional[Dict[str, Any]],
     repo_root: Path,
 ) -> int:
-    """Walk synthesis matches → look up function names → write
-    annotations. Triage verdicts (when present) gate emission:
-    ``variant`` lands as ``suspicious``; ``false_positive`` and
-    ``skipped`` are dropped; ``uncertain`` lands as ``suspicious``
-    too (operator should look). Untriaged matches always land."""
-    from core.annotations import Annotation, write_annotation
-
+    """Walk synthesis matches -> write to checker-matches.jsonl.
+    Triage verdicts (when present) gate emission: ``variant`` lands;
+    ``false_positive`` and ``skipped`` are dropped; ``uncertain``
+    also lands (operator should look). Untriaged matches always land."""
     triage_by_match = {
         (t.match.file, t.match.line): t.status
         for t in (result.triage or [])
     }
 
     written = 0
-    base_dir = out_dir / "annotations"
+    matches_path = out_dir / CHECKER_MATCHES_FILE
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     for m in result.matches:
         triage_status = triage_by_match.get((m.file, m.line))
@@ -302,40 +265,31 @@ def _emit_variants(
             continue
 
         function_name = _resolve_match_function(m, checklist, repo_root)
-        if not function_name:
-            continue
 
-        metadata: Dict[str, str] = {
-            "source": "llm",
-            "status": "suspicious",
-            "variant_of_file": _sanitise_meta(seed.file),
-            "variant_of_function": _sanitise_meta(seed.function),
-            "rule_id": _sanitise_meta(result.rule.rule_id),
-            "engine": _sanitise_meta(result.rule.engine),
+        record = {
+            "file": m.file,
+            "line": m.line,
+            "function": function_name,
+            "snippet": m.snippet or "",
+            "seed_file": seed.file,
+            "seed_function": seed.function,
+            "seed_line_start": seed.line_start,
+            "seed_line_end": seed.line_end,
+            "cwe": seed.cwe or None,
+            "rule_id": result.rule.rule_id,
+            "engine": result.rule.engine,
+            "rationale": result.rule.rationale or "",
+            "triage": triage_status,
         }
-        if seed.cwe:
-            metadata["cwe"] = _sanitise_meta(seed.cwe)
-        if triage_status:
-            metadata["triage"] = _sanitise_meta(triage_status)
-
-        ann = Annotation(
-            file=m.file,
-            function=function_name,
-            body=_build_variant_body(seed, result.rule, m),
-            metadata=metadata,
-        )
         try:
-            path = write_annotation(
-                base_dir, ann, overwrite="respect-manual",
-            )
+            line = json.dumps(record, separators=(",", ":")) + "\n"
+            with open(matches_path, "a", encoding="utf-8") as f:
+                f.write(line)
+            written += 1
         except Exception:
             logger.warning(
-                "checker_followup: variant annotation write failed "
-                "for %s:%s",
+                "checker_followup: match write failed for %s:%s",
                 m.file, m.line,
                 exc_info=True,
             )
-            continue
-        if path is not None:
-            written += 1
     return written
