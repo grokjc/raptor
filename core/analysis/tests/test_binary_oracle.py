@@ -118,6 +118,7 @@ def test_unknown_source_name_is_absent(built_demo: Path) -> None:
     assert verdicts["a_function_that_does_not_exist"].classification == "absent"
 
 
+@pytest.mark.slow
 def test_folded_pair_is_consistent(built_demo: Path) -> None:
     """``folded_a`` and ``folded_b`` have identical bodies. With an
     ICF-capable linker they're ``folded``; without one they're both
@@ -139,6 +140,7 @@ def test_classify_on_nonexistent_binary_is_empty(tmp_path: Path) -> None:
     assert verdicts == {}
 
 
+@pytest.mark.slow
 def test_classify_on_stripped_binary_uses_symbol_only_fallback(
     built_demo: Path, tmp_path: Path,
 ) -> None:
@@ -243,6 +245,7 @@ def test_enrich_with_missing_binary_is_a_noop(tmp_path: Path) -> None:
         assert "binary_oracle" not in it.get("metadata", {})
 
 
+@pytest.mark.slow
 def test_enrich_is_idempotent(built_demo: Path) -> None:
     """Running enrich twice produces the same result."""
     inv = _synthetic_inventory_for_fixture()
@@ -369,6 +372,7 @@ def test_classifier_does_not_crash_on_stripped_real_binary() -> None:
 # E1 — stripped-binary fallback (symbol-only tier)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.slow
 def test_classifier_falls_back_to_symbol_only_on_stripped_binary(
     tmp_path: Path,
 ) -> None:
