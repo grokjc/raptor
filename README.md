@@ -153,6 +153,7 @@ Environment variables that could inject code into the launcher chain are strippe
 | `/oss-forensics` | Evidence-backed forensic investigation for GitHub repositories | Stable |
 | `/project` | Named workspaces to organise runs and track findings over time | Stable |
 | `/threat-model` | Create, inspect, and maintain per-project threat models | Stable |
+| `/sage` | Persistent memory layer (store, recall, link, corroborate) | Stable |
 | `/frida` | Dynamic instrumentation via Frida | Alpha |
 | `/web` | Web application scanning | Alpha/stub |
 
@@ -262,6 +263,12 @@ When CodeQL produces a path result, the path constraints are checked for satisfi
 During binary exploit feasibility assessment, Z3 checks whether a one-gadget's register and memory constraints are satisfiable against the concrete crash state. Gadgets are ranked by actual reachability rather than heuristics, so you spend time on gadgets that can actually work.
 
 Z3 is pre-installed in the devcontainer. For manual installs: `pip install z3-solver`.
+
+---
+
+## orjson (optional)
+
+When `orjson` is installed (`pip install orjson`), RAPTOR uses it for all JSON parsing and serialisation. The speedup matters on large inventories and finding sets. Without it, everything works identically via stdlib `json` — the switch is transparent.
 
 ---
 
