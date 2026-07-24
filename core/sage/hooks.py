@@ -431,6 +431,131 @@ def store_fuzzing_strategy_outcome(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Finding verdict — cross-run FP suppression (generalised SCA pattern)
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SUPPRESS_VERDICTS = frozenset({"false_positive", "not_exploitable"})
+
+_VERDICT_CONFIDENCE: Dict[str, float] = {
+    "false_positive": 0.95,
+    "not_exploitable": 0.90,
+    "exploitable": 0.95,
+    "true_positive": 0.90,
+}
+
+
+def _fp_domain(repo_path: str) -> str:
+    return f"raptor-fp-{_repo_key(repo_path)}"
+
+
+def _finding_fingerprint(rule_id: str, file_path: str, function: str) -> str:
+    raw = f"{rule_id}|{file_path}|{function}"
+    return sha256_string(raw)[:16]
+
+
+def compute_finding_source_hash(
+    file_path: Path,
+    line: int,
+    window: int = 10,
+) -> str:
+    """Hash the source lines around a finding for staleness detection.
+
+    Returns SHA-256[:12] via ``core.staleness.hash_span``, or ``""``
+    if the file is unreadable or ``line`` is invalid.
+    """
+    from core.staleness import hash_span
+    start = max(1, line - window)
+    end = line + window
+    return hash_span(file_path, start, end)
+
+
+def recall_prior_finding_verdict(
+    repo_path: str,
+    rule_id: str,
+    file_path: str,
+    function: str,
+    source_hash: str,
+) -> Optional[Dict[str, Any]]:
+    """Recall a prior finding verdict from SAGE.
+
+    Returns ``{verdict, source_hash, confidence}`` if a suppressible
+    prior verdict exists AND the stored source_hash matches.  Returns
+    ``None`` otherwise (no prior, hash mismatch, or non-suppressible
+    verdict).
+    """
+    if not source_hash:
+        return None
+    client = _get_client()
+    if client is None:
+        return None
+    try:
+        _sage_metrics["recall_attempted"] += 1
+        results = client.query(
+            text=(
+                f"Finding verdict: rule={rule_id} "
+                f"file={file_path} fn={function}"
+            ),
+            domain_tag=_fp_domain(repo_path),
+            top_k=3,
+            min_confidence=0.7,
+        )
+        for row in results:
+            content = str(row.get("content") or "")
+            if f"src={source_hash}" not in content:
+                continue
+            for v in _SUPPRESS_VERDICTS:
+                if f"verdict={v}" in content:
+                    _sage_metrics["recall_hits"] += 1
+                    return {
+                        "verdict": v,
+                        "source_hash": source_hash,
+                        "confidence": recall_row_confidence(row),
+                    }
+        return None
+    except Exception as e:
+        logger.debug("SAGE FP recall failed: %s", e)
+        return None
+
+
+def store_finding_verdict(
+    repo_path: str,
+    rule_id: str,
+    file_path: str,
+    function: str,
+    source_hash: str,
+    verdict: str,
+) -> bool:
+    """Store a finding verdict to SAGE for cross-run FP suppression.
+
+    All verdicts are stored (building the knowledge base), but only
+    ``false_positive`` and ``not_exploitable`` trigger suppression on
+    future recall.
+    """
+    if not source_hash:
+        return False
+    client = _get_client()
+    if client is None:
+        return False
+    try:
+        fp = _finding_fingerprint(rule_id, file_path, function)
+        return _propose_redacted(
+            client=client,
+            content=(
+                f"Finding verdict: fp={fp} rule={rule_id} "
+                f"file={file_path} fn={function} "
+                f"src={source_hash} verdict={verdict}"
+            ),
+            memory_type="fact",
+            domain_tag=_fp_domain(repo_path),
+            confidence=_VERDICT_CONFIDENCE.get(verdict, 0.80),
+            tags=["finding", "verdict", verdict, rule_id],
+        )
+    except Exception as e:
+        logger.debug("SAGE FP store failed: %s", e)
+        return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # SCA (Software Composition Analysis) — mechanical short-circuit
 # ─────────────────────────────────────────────────────────────────────────────
 

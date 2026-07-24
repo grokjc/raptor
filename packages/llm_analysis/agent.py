@@ -2258,6 +2258,8 @@ class AutonomousSecurityAgentV2:
         # module_aborts / lexical_dead). Counted separately so the operator
         # can see the savings split across the two short-circuit paths.
         reachability_skipped_llm_calls = 0
+        sage_fp_skipped_llm_calls = 0
+        sage_fp_stored = 0
         idx = 0  # prevent UnboundLocalError when empty
 
         is_prep = isinstance(self.llm, ClaudeCodeProvider)
@@ -2482,6 +2484,76 @@ class AutonomousSecurityAgentV2:
                             journal_entries_emitted += 1
                     continue  # skip LLM analyze + exploit + patch
 
+                # 0c. SAGE prior-verdict suppression — if a prior run
+                # already classified this finding as FP / not-exploitable
+                # and the source around the finding hasn't changed, skip
+                # the LLM call entirely.
+                sage_fp_skipped_this = False
+                try:
+                    from core.sage.hooks import (
+                        recall_prior_finding_verdict,
+                        compute_finding_source_hash,
+                    )
+                    _rel = (finding.get("file_path")
+                            or finding.get("file") or "")
+                    _fn = (finding.get("function")
+                           or (finding.get("metadata") or {}).get(
+                               "function_name", ""))
+                    _rule = (finding.get("rule_id")
+                             or finding.get("check_id") or "")
+                    _line = int(finding.get("line") or 0)
+                    if _rel and _fn and _rule and _line > 0:
+                        _src_hash = compute_finding_source_hash(
+                            Path(self.repo_path) / _rel, _line)
+                        if _src_hash:
+                            prior = recall_prior_finding_verdict(
+                                str(self.repo_path), _rule,
+                                _rel, _fn, _src_hash,
+                            )
+                            if prior is not None:
+                                vuln.analysis = {
+                                    "is_true_positive": False,
+                                    "is_exploitable": False,
+                                    "reasoning": (
+                                        f"SAGE prior verdict: "
+                                        f"{prior['verdict']} "
+                                        f"(confidence "
+                                        f"{prior['confidence']:.2f})"
+                                    ),
+                                    "sage_fp_suppression": True,
+                                    "sage_verdict": prior["verdict"],
+                                }
+                                sage_fp_skipped_this = True
+                                try:
+                                    from core.analysis.reach_chokepoint \
+                                        import record_suppression
+                                    record_suppression(
+                                        self.out_dir,
+                                        finding=finding,
+                                        verdict=f"sage_{prior['verdict']}",
+                                        reason=(
+                                            "SAGE prior-verdict "
+                                            "suppression: source "
+                                            "unchanged"
+                                        ),
+                                    )
+                                except Exception:
+                                    pass
+                except Exception as e:
+                    logger.debug(
+                        "SAGE FP pre-flight failed on %s: %s",
+                        finding.get("finding_id") or finding.get("id"),
+                        e,
+                    )
+
+                if sage_fp_skipped_this:
+                    analyzed += 1
+                    sage_fp_skipped_llm_calls += 1
+                    if emit_journal:
+                        if self._emit_journal_entry(vuln, checklist):
+                            journal_entries_emitted += 1
+                    continue  # skip LLM analyze + exploit + patch
+
                 # 1. Autonomous analysis (LLM-powered, or prep-only)
                 if self.analyze_vulnerability(vuln):
                     analyzed += 1
@@ -2542,6 +2614,46 @@ class AutonomousSecurityAgentV2:
                     else:
                         logger.debug("⊘ Skipping patch generation (not exploitable)")
 
+                # Post-LLM: store verdict to SAGE for cross-run
+                # FP suppression.  Best-effort — never blocks.
+                if vuln.analysis and not sage_fp_skipped_this:
+                    try:
+                        from core.sage.hooks import (
+                            store_finding_verdict,
+                            compute_finding_source_hash,
+                        )
+                        _rel = (finding.get("file_path")
+                                or finding.get("file") or "")
+                        _fn = (finding.get("function")
+                               or (finding.get("metadata") or {}).get(
+                                   "function_name", ""))
+                        _rule = (finding.get("rule_id")
+                                 or finding.get("check_id") or "")
+                        _line = int(finding.get("line") or 0)
+                        if _rel and _fn and _rule and _line > 0:
+                            _src_hash = compute_finding_source_hash(
+                                Path(self.repo_path) / _rel, _line)
+                            if _src_hash:
+                                is_tp = vuln.analysis.get(
+                                    "is_true_positive", False)
+                                is_ex = vuln.analysis.get(
+                                    "is_exploitable", False)
+                                if not is_tp:
+                                    _v = "false_positive"
+                                elif is_ex:
+                                    _v = "exploitable"
+                                elif is_tp and not is_ex:
+                                    _v = "not_exploitable"
+                                else:
+                                    _v = "true_positive"
+                                if store_finding_verdict(
+                                    str(self.repo_path), _rule,
+                                    _rel, _fn, _src_hash, _v,
+                                ):
+                                    sage_fp_stored += 1
+                    except Exception:
+                        pass
+
                 # Always include finding in results (with or without LLM analysis)
                 results.append(vuln.to_dict())
 
@@ -2581,6 +2693,10 @@ class AutonomousSecurityAgentV2:
             "fixture_detection_metrics": {
                 "prep_outcomes": fixture_prep_outcomes,
                 "skipped_llm_calls": fixture_skipped_llm_calls,
+            },
+            "sage_fp_suppression": {
+                "skipped_llm_calls": sage_fp_skipped_llm_calls,
+                "verdicts_stored": sage_fp_stored,
             },
             "execution_time": execution_time,
             "llm_stats": llm_stats,
@@ -2633,6 +2749,12 @@ class AutonomousSecurityAgentV2:
                     f"{fixture_skipped_llm_calls} LLM call(s) skipped "
                     f"(test-harness circularity); prep outcomes "
                     f"{fixture_prep_outcomes}"
+                )
+            if sage_fp_skipped_llm_calls > 0:
+                logger.info(
+                    f"✓ SAGE prior-verdict suppression: "
+                    f"{sage_fp_skipped_llm_calls} LLM call(s) skipped, "
+                    f"{sage_fp_stored} verdict(s) stored"
                 )
             logger.info("")
             if dataflow_validated > 0:

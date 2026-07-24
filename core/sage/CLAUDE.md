@@ -16,6 +16,7 @@ If this file is loaded, SAGE is available — use it.
 - `raptor-fuzzing` — Fuzzing strategies and crash outcomes
 - `raptor-sca-{repo_key}` — SCA findings and verdicts (repo-scoped)
 - `raptor-methodology` — Analysis methodology and expert reasoning
+- `raptor-fp-{repo_key}` — Finding verdicts for cross-run FP suppression (repo-scoped)
 - `raptor-concepts` — Study concept recall (N1, planned)
 
 ## Domain rationale
@@ -35,6 +36,8 @@ flag. No prompt injection (recalled text dropped into an LLM prompt).
 | `recall_context_for_fuzzing_strategy` / `store_fuzzing_strategy_outcome` | Mechanical AFL flag inference from prior strategy rows | `raptor-fuzzing` |
 | `infer_afl_fuzz_flags_from_sage_recall_row` | Derive `-L 0`, `-D`, `-p explore` from recall content | (utility) |
 | `recall_context_for_codeql_build` / `store_codeql_build_reliability` | Accumulate CodeQL build reliability data (upgrade to mechanical pending) | `raptor-methodology` |
+| `recall_prior_finding_verdict` / `store_finding_verdict` | Cross-run FP suppression: skip LLM for findings with a prior false_positive/not_exploitable verdict and unchanged source | `raptor-fp-{key}` |
+| `compute_finding_source_hash` | Hash source lines around a finding line for staleness detection | (utility) |
 
 ## When to use
 

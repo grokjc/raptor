@@ -380,5 +380,150 @@ class TestSCAHooks(unittest.TestCase):
         mock_client.propose.assert_not_called()
 
 
+class TestFindingVerdictHooks(unittest.TestCase):
+    """Test cross-run FP suppression hooks."""
+
+    def test_finding_fingerprint_stable(self):
+        from core.sage.hooks import _finding_fingerprint
+        fp1 = _finding_fingerprint("CWE-89", "src/db.py", "run_query")
+        fp2 = _finding_fingerprint("CWE-89", "src/db.py", "run_query")
+        self.assertEqual(fp1, fp2)
+        self.assertEqual(len(fp1), 16)
+
+    def test_finding_fingerprint_varies_on_input(self):
+        from core.sage.hooks import _finding_fingerprint
+        fp1 = _finding_fingerprint("CWE-89", "src/db.py", "run_query")
+        fp2 = _finding_fingerprint("CWE-79", "src/db.py", "run_query")
+        self.assertNotEqual(fp1, fp2)
+
+    @patch("core.sage.hooks._get_client", return_value=None)
+    def test_recall_returns_none_when_unavailable(self, _):
+        from core.sage.hooks import recall_prior_finding_verdict
+        self.assertIsNone(recall_prior_finding_verdict(
+            "/repo", "CWE-89", "src/db.py", "run_query", "abc123"))
+
+    def test_recall_returns_none_when_no_source_hash(self):
+        from core.sage.hooks import recall_prior_finding_verdict
+        self.assertIsNone(recall_prior_finding_verdict(
+            "/repo", "CWE-89", "src/db.py", "run_query", ""))
+
+    @patch("core.sage.hooks._get_client")
+    def test_recall_matches_on_source_hash_and_verdict(self, mock_get_client):
+        mock_client = MagicMock()
+        mock_client.query.return_value = [{
+            "content": (
+                "Finding verdict: fp=abcd1234 rule=CWE-89 "
+                "file=src/db.py fn=run_query "
+                "src=deadbeef1234 verdict=false_positive"
+            ),
+            "confidence": 0.95,
+        }]
+        mock_get_client.return_value = mock_client
+
+        from core.sage.hooks import recall_prior_finding_verdict
+        result = recall_prior_finding_verdict(
+            "/repo", "CWE-89", "src/db.py", "run_query", "deadbeef1234")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["verdict"], "false_positive")
+        self.assertEqual(result["source_hash"], "deadbeef1234")
+
+    @patch("core.sage.hooks._get_client")
+    def test_recall_rejects_hash_mismatch(self, mock_get_client):
+        mock_client = MagicMock()
+        mock_client.query.return_value = [{
+            "content": (
+                "Finding verdict: fp=abcd1234 rule=CWE-89 "
+                "file=src/db.py fn=run_query "
+                "src=deadbeef1234 verdict=false_positive"
+            ),
+            "confidence": 0.95,
+        }]
+        mock_get_client.return_value = mock_client
+
+        from core.sage.hooks import recall_prior_finding_verdict
+        result = recall_prior_finding_verdict(
+            "/repo", "CWE-89", "src/db.py", "run_query", "different_hash")
+        self.assertIsNone(result)
+
+    @patch("core.sage.hooks._get_client")
+    def test_recall_ignores_non_suppressible_verdicts(self, mock_get_client):
+        mock_client = MagicMock()
+        mock_client.query.return_value = [{
+            "content": (
+                "Finding verdict: fp=abcd1234 rule=CWE-89 "
+                "file=src/db.py fn=run_query "
+                "src=deadbeef1234 verdict=exploitable"
+            ),
+            "confidence": 0.95,
+        }]
+        mock_get_client.return_value = mock_client
+
+        from core.sage.hooks import recall_prior_finding_verdict
+        result = recall_prior_finding_verdict(
+            "/repo", "CWE-89", "src/db.py", "run_query", "deadbeef1234")
+        self.assertIsNone(result)
+
+    @patch("core.sage.hooks._get_client", return_value=None)
+    def test_store_returns_false_when_unavailable(self, _):
+        from core.sage.hooks import store_finding_verdict
+        self.assertFalse(store_finding_verdict(
+            "/repo", "CWE-89", "src/db.py", "run_query",
+            "abc123", "false_positive"))
+
+    def test_store_returns_false_when_no_source_hash(self):
+        from core.sage.hooks import store_finding_verdict
+        self.assertFalse(store_finding_verdict(
+            "/repo", "CWE-89", "src/db.py", "run_query",
+            "", "false_positive"))
+
+    @patch("core.sage.hooks._get_client")
+    def test_store_proposes_with_correct_fields(self, mock_get_client):
+        mock_client = MagicMock()
+        mock_client.propose.return_value = True
+        mock_get_client.return_value = mock_client
+
+        from core.sage.hooks import store_finding_verdict
+        result = store_finding_verdict(
+            "/repo", "CWE-89", "src/db.py", "run_query",
+            "deadbeef1234", "false_positive")
+        self.assertTrue(result)
+
+        kwargs = mock_client.propose.call_args.kwargs
+        self.assertIn("CWE-89", kwargs["content"])
+        self.assertIn("src/db.py", kwargs["content"])
+        self.assertIn("run_query", kwargs["content"])
+        self.assertIn("deadbeef1234", kwargs["content"])
+        self.assertIn("false_positive", kwargs["content"])
+        self.assertEqual(kwargs["memory_type"], "fact")
+        self.assertIn("raptor-fp-", kwargs["domain_tag"])
+        self.assertEqual(kwargs["confidence"], 0.95)
+        self.assertIn("finding", kwargs["tags"])
+        self.assertIn("verdict", kwargs["tags"])
+        self.assertIn("CWE-89", kwargs["tags"])
+
+    @patch("core.sage.hooks._get_client")
+    def test_store_not_exploitable_confidence(self, mock_get_client):
+        mock_client = MagicMock()
+        mock_client.propose.return_value = True
+        mock_get_client.return_value = mock_client
+
+        from core.sage.hooks import store_finding_verdict
+        store_finding_verdict(
+            "/repo", "CWE-89", "src/db.py", "run_query",
+            "abc123", "not_exploitable")
+        kwargs = mock_client.propose.call_args.kwargs
+        self.assertEqual(kwargs["confidence"], 0.90)
+
+    @patch("core.sage.hooks._get_client")
+    def test_recall_handles_error_gracefully(self, mock_get_client):
+        mock_client = MagicMock()
+        mock_client.query.side_effect = ConnectionError("down")
+        mock_get_client.return_value = mock_client
+
+        from core.sage.hooks import recall_prior_finding_verdict
+        self.assertIsNone(recall_prior_finding_verdict(
+            "/repo", "CWE-89", "src/db.py", "run_query", "abc123"))
+
+
 if __name__ == "__main__":
     unittest.main()

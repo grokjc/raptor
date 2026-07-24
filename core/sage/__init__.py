@@ -12,6 +12,10 @@ from .hooks import (
     # SCA (mechanical short-circuit)
     recall_context_for_sca,
     store_sca_outcomes,
+    # Finding verdict — cross-run FP suppression
+    recall_prior_finding_verdict,
+    store_finding_verdict,
+    compute_finding_source_hash,
 )
 
 __all__ = [
@@ -23,4 +27,7 @@ __all__ = [
     "store_fuzzing_strategy_outcome",
     "recall_context_for_sca",
     "store_sca_outcomes",
+    "recall_prior_finding_verdict",
+    "store_finding_verdict",
+    "compute_finding_source_hash",
 ]
