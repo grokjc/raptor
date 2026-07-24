@@ -638,8 +638,7 @@ class AutonomousSecurityAgentV2:
                  verify_exploits: bool = True,
                  judge_intent: bool = True,
                  record_witnesses: bool = True,
-                 use_verified_exemplars: bool = True,
-                 sage_precall_memories: Optional[List[Dict[str, Any]]] = None):
+                 use_verified_exemplars: bool = True):
         self.repo_path = repo_path
         self.out_dir = out_dir
         self.out_dir.mkdir(parents=True, exist_ok=True)
@@ -691,13 +690,6 @@ class AutonomousSecurityAgentV2:
         # prompts are unchanged.
         self.use_verified_exemplars = use_verified_exemplars
         self._verified_outcomes = None  # lazy, collected once per run
-
-        self._sage_precall_text = ""
-        if sage_precall_memories:
-            from core.sage.hooks import format_sage_memories_for_prompt
-            self._sage_precall_text = (
-                format_sage_memories_for_prompt(sage_precall_memories) or ""
-            )
 
         # Detect LLM availability and choose provider
         availability = detect_llm_availability()
@@ -1057,16 +1049,6 @@ class AutonomousSecurityAgentV2:
                 extra_blocks.append(tm_block)
         except Exception as exc:
             logger.debug("threat_model_untrusted_block failed: %s", exc)
-
-        if getattr(self, "_sage_precall_text", ""):
-            from core.security.prompt_envelope import UntrustedBlock
-            extra_blocks.append(
-                UntrustedBlock(
-                    content=self._sage_precall_text,
-                    kind="sage-precall-scan-context",
-                    origin="sage:precall",
-                ),
-            )
 
         bundle = build_analysis_prompt_bundle(
             rule_id=vuln.rule_id,
@@ -2829,11 +2811,6 @@ def main() -> None:
         action="store_true",
         help="Skip LLM patch generation for exploitable findings.",
     )
-    ap.add_argument(
-        "--sage-precall",
-        metavar="PATH",
-        help='JSON file with {"memories": [...]} from SAGE pre-scan recall',
-    )
 
     model_group = ap.add_argument_group(
         "multi-model analysis",
@@ -2906,14 +2883,6 @@ def main() -> None:
         # Collision-prevention via unique_run_suffix — see core/run/output.py.
         out_dir = RaptorConfig.get_out_dir() / f"autonomous_v2_{unique_run_suffix('_')}"
 
-    sage_precall_memories: Optional[List[Dict[str, Any]]] = None
-    if getattr(args, "sage_precall", None):
-        precall_path = Path(args.sage_precall)
-        if precall_path.is_file():
-            raw = load_json(precall_path)
-            if isinstance(raw, dict):
-                sage_precall_memories = raw.get("memories") or []
-
     # When role flags are present, force prep-only then hand off to orchestrator
     prep_only = args.prep_only or _has_role_flags
     agent = AutonomousSecurityAgentV2(
@@ -2927,7 +2896,6 @@ def main() -> None:
         use_verified_exemplars=not args.no_verified_exemplars,
         generate_exploits=not args.no_exploits,
         generate_patches=not args.no_patches,
-        sage_precall_memories=sage_precall_memories,
     )
 
     # Load checklist for metadata lookup

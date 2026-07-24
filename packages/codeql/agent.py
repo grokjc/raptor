@@ -859,14 +859,6 @@ Examples:
             codeql_cli=args.codeql_cli
         )
 
-        from core.sage.hooks import format_sage_memories_for_prompt, recall_context_for_codeql_build
-        sage_rows = recall_context_for_codeql_build(
-            str(Path(args.repo).resolve()), languages=languages
-        )
-        sage_ctx = format_sage_memories_for_prompt(sage_rows)
-        if sage_ctx:
-            logger.info("SAGE CodeQL build recall:\n%s", sage_ctx[:4000])
-
         # Run analysis
         result = agent.run_autonomous_analysis(
             languages=languages,
@@ -874,7 +866,6 @@ Examples:
             force_db_creation=args.force,
             use_extended=args.extended,
             min_files=args.min_files,
-            sage_build_recall=sage_ctx or None,
         )
 
         # Print summary
